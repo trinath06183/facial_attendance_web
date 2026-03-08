@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block title %}Edit Student — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="px-8 py-8 w-full max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 font-inter tracking-tight">Edit Student Record</h1>
+            <p class="text-sm text-gray-500 mt-1">Update details or rescan face for {{ student.roll_number }}</p>
+        </div>
+        <a href="{% url 'view_all_students' %}"
+            class="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
+            <i class="fas fa-arrow-left mr-2"></i>Back to Directory
+        </a>
+    </div>
+
+    <!-- Feedback Messages -->
+    {% if messages %}
+    <div class="mb-6 space-y-2">
+        {% for message in messages %}
+        <div
+            class="px-4 py-3 rounded-xl text-sm font-medium {% if message.tags == 'success' %}bg-green-50 text-green-700 border border-green-200{% else %}bg-red-50 text-red-700 border border-red-200{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Main Form Card -->
+        <div class="md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div class="p-6 border-b border-gray-100 bg-gray-50/50">
+                <h2 class="text-base font-semibold text-gray-900">Personal & Academic Details</h2>
+            </div>
+
+            <form method="POST" class="p-6 space-y-5">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="save">
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Username (Login ID)</label>
+                    <input type="text" name="username" value="{{ student.user_profile.user.username }}" required
+                        class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900">
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Roll Number</label>
+                        <input type="text" name="roll_number" value="{{ student.roll_number }}" required
+                            class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900 font-mono">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                        <input type="text" name="department" value="{{ student.department }}" required
+                            class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900">
+                    </div>
+                </div>
+
+                <div class="pt-4 border-t border-gray-100">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Reset Password</label>
+                    <p class="text-xs text-gray-500 mb-3">Leave this blank if you do not wish to change the student's
+                        password.</p>
+                    <input type="password" name="password" placeholder="Enter new password (optional)"
+                        class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-gray-900">
+                </div>
+
+                <div class="pt-2 flex justify-end">
+                    <button type="submit"
+                        class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all shadow-sm shadow-blue-200">
+                        <i class="fas fa-save mr-2"></i>Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Biometric Status Card -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
+            <div class="p-6 border-b border-gray-100 bg-gray-50/50">
+                <h2 class="text-base font-semibold text-gray-900">Biometric Status</h2>
+            </div>
+            <div class="p-6 flex-1 flex flex-col">
+
+                <div class="flex items-center gap-4 mb-6">
+                    <div
+                        class="w-12 h-12 rounded-full flex items-center justify-center {% if student.user_profile.is_face_registered %}bg-green-100 text-green-600{% else %}bg-red-100 text-red-600{% endif %}">
+                        <i
+                            class="fas {% if student.user_profile.is_face_registered %}fa-check{% else %}fa-times{% endif %} text-xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm font-medium text-gray-900">Face Data</p>
+                        <p
+                            class="text-xs font-medium {% if student.user_profile.is_face_registered %}text-green-600{% else %}text-red-600{% endif %}">
+                            {% if student.user_profile.is_face_registered %}Registered & Active{% else %}Missing or
+                            Invalid{% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                <p class="text-xs text-gray-500 mb-6 flex-1">
+                    If this student is having trouble scanning their face, or if their appearance has changed
+                    significantly, you can clear their existing biometric data and rescan them immediately.
+                </p>
+
+                <form method="POST"
+                    onsubmit="return confirm('This will invalidate their current face data and begin a new capture session. Are you sure?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="rescan">
+                    <button type="submit"
+                        class="w-full px-4 py-2.5 border-2 border-dashed border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 font-medium rounded-xl transition-all flex items-center justify-center gap-2">
+                        <i class="fas fa-camera-viewfinder"></i> Rescan Face Now
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

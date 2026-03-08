@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% block title %}Edit Attendance — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="px-8 py-8 w-full max-w-lg mx-auto">
+    <div class="flex items-center justify-between mb-8">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900 font-inter tracking-tight">Edit Attendance</h1>
+            <p class="text-sm text-gray-500 mt-1">Update log for {{ record.student.roll_number }}</p>
+        </div>
+        <a href="{% url 'todays_attendance' %}"
+            class="px-4 py-2 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium">
+            <i class="fas fa-arrow-left mr-2"></i>Back
+        </a>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div class="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-lg">
+                    {{ record.student.user_profile.user.username|make_list|first|upper }}
+                </div>
+                <div>
+                    <h2 class="text-base font-semibold text-gray-900">{{ record.student.user_profile.user.username }}
+                    </h2>
+                    <p class="text-xs text-gray-500 font-mono">{{ record.student.roll_number }}</p>
+                </div>
+            </div>
+        </div>
+
+        <form method="POST" class="p-6 space-y-6">
+            {% csrf_token %}
+
+            <div class="bg-gray-50 rounded-xl p-4 flex justify-between items-center border border-gray-100">
+                <div>
+                    <p class="text-xs text-gray-500 font-medium uppercase tracking-wider mb-1">Date Logged</p>
+                    <p class="font-semibold text-gray-900">{{ record.date }}</p>
+                </div>
+                <div class="text-right">
+                    <p class="text-xs text-gray-500 font-medium uppercase tracking-wider mb-1">Time Logged</p>
+                    <p class="font-semibold text-gray-900 font-mono">{{ record.time|time:"h:i A" }}</p>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Override Status</label>
+                <div class="grid grid-cols-3 gap-3">
+                    <label class="cursor-pointer">
+                        {% if record.status == 'Present' %}
+                        <input type="radio" name="status" value="Present" class="peer sr-only" checked>
+                        {% else %}
+                        <input type="radio" name="status" value="Present" class="peer sr-only">
+                        {% endif %}
+                        <div
+                            class="text-center py-2.5 rounded-lg border-2 peer-checked:border-green-500 peer-checked:bg-green-50 peer-checked:text-green-700 text-gray-500 border-gray-200 font-medium transition-all text-sm">
+                            Present
+                        </div>
+                    </label>
+                    <label class="cursor-pointer">
+                        {% if record.status == 'Late' %}
+                        <input type="radio" name="status" value="Late" class="peer sr-only" checked>
+                        {% else %}
+                        <input type="radio" name="status" value="Late" class="peer sr-only">
+                        {% endif %}
+                        <div
+                            class="text-center py-2.5 rounded-lg border-2 peer-checked:border-orange-500 peer-checked:bg-orange-50 peer-checked:text-orange-700 text-gray-500 border-gray-200 font-medium transition-all text-sm">
+                            Late
+                        </div>
+                    </label>
+                    <label class="cursor-pointer">
+                        {% if record.status == 'Absent' %}
+                        <input type="radio" name="status" value="Absent" class="peer sr-only" checked>
+                        {% else %}
+                        <input type="radio" name="status" value="Absent" class="peer sr-only">
+                        {% endif %}
+                        <div
+                            class="text-center py-2.5 rounded-lg border-2 peer-checked:border-red-500 peer-checked:bg-red-50 peer-checked:text-red-700 text-gray-500 border-gray-200 font-medium transition-all text-sm">
+                            Absent
+                        </div>
+                    </label>
+                </div>
+                <p class="text-xs text-gray-500 mt-2"><i class="fas fa-info-circle mr-1"></i> Modifying this will affect
+                    the overall generated reports.</p>
+            </div>
+
+            <div class="pt-2">
+                <button type="submit"
+                    class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-all shadow-sm shadow-blue-200 flex items-center justify-center gap-2">
+                    <i class="fas fa-check-circle"></i> Confirm Update
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

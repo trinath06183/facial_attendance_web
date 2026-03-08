@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Login — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center px-6 py-12">
+  <div class="w-full max-w-sm bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
+
+    <div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-5">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.8"
+        stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M6 20v-1a6 6 0 0 1 12 0v1" />
+      </svg>
+    </div>
+
+    <h1 class="text-2xl font-bold text-gray-900 mb-1">Welcome back</h1>
+    <p class="text-gray-500 text-sm mb-7">Sign in to your SmartAttend account</p>
+    <form method="POST" action="{% url 'login' %}">
+      {% csrf_token %}
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
+        <input type="text" name="username" placeholder="Enter your username"
+          class="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+          required />
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-1.5">Password</label>
+        <input type="password" name="password" placeholder="Enter your password"
+          class="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+          required />
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <button type="submit"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+          Sign In
+        </button>
+        <a href="{% url 'home' %}"
+          class="w-full bg-white hover:bg-gray-50 text-gray-600 font-medium py-2.5 rounded-lg text-sm transition-colors text-center border border-gray-200">
+          Back to Home
+        </a>
+      </div>
+    </form>
+
+    <!-- Auto-hiding messages -->
+    {% if messages %}
+    <div id="login-messages" class="mt-6 space-y-2">
+      {% for message in messages %}
+      <div class="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2 flex items-center gap-2">
+        <i class="fas fa-exclamation-circle"></i> {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    <script>
+      setTimeout(function () {
+        const msgBox = document.getElementById('login-messages');
+        if (msgBox) {
+          msgBox.style.transition = 'opacity 0.5s ease';
+          msgBox.style.opacity = '0';
+          setTimeout(() => msgBox.remove(), 500);
+        }
+      }, 15000); // 15 seconds
+    </script>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

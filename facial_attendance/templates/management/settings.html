@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}App Settings — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="p-8 bg-white min-h-screen">
+    <header class="flex justify-between items-center mb-10">
+        <div>
+            <h1 class="text-3xl font-black text-gray-900">Application Settings</h1>
+            <p class="text-gray-400 text-sm">Enable or disable features across the entire application.</p>
+        </div>
+    </header>
+
+    {% if messages %}
+    <div class="mb-6">
+        {% for msg in messages %}
+        <div class="px-5 py-3 rounded-2xl text-sm font-medium
+            {% if msg.tags == 'success' %}bg-green-50 text-green-700 border border-green-100
+            {% elif msg.tags == 'error' %}bg-red-50 text-red-700 border border-red-100
+            {% else %}bg-blue-50 text-blue-700 border border-blue-100{% endif %}">
+            {{ msg }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="max-w-3xl space-y-4">
+        {% for setting in settings %}
+        <form method="POST" action="">
+            {% csrf_token %}
+            <input type="hidden" name="setting_id" value="{{ setting.id }}">
+            <div
+                class="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 flex items-center justify-between gap-6">
+                <div>
+                    <h3 class="font-bold text-gray-800">{{ setting.name | title | cut:"_" }}</h3>
+                    <p class="text-sm text-gray-400 mt-0.5">{{ setting.description }}</p>
+                </div>
+                <button type="submit" class="relative inline-flex flex-shrink-0 h-7 w-14 items-center rounded-full transition-colors duration-300 focus:outline-none
+                    {% if setting.is_enabled %}bg-indigo-600{% else %}bg-gray-200{% endif %}">
+                    <span class="sr-only">Toggle {{ setting.name }}</span>
+                    <span class="inline-block h-5 w-5 rounded-full bg-white shadow-md transform transition-transform duration-300
+                        {% if setting.is_enabled %}translate-x-8{% else %}translate-x-1{% endif %}">
+                    </span>
+                </button>
+            </div>
+        </form>
+        {% empty %}
+        <div class="text-center py-16 text-gray-400">
+            <i class="fas fa-cog text-4xl mb-4 block"></i>
+            <p class="font-medium">No settings found. They will appear here automatically.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

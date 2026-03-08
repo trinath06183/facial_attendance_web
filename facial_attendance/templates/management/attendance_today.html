@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block title %}Today's Attendance — SmartAttend{% endblock %}
+
+{% block content %}
+<header
+    class="bg-white border-b border-gray-100 px-8 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <h2 class="text-xl font-bold text-gray-800 tracking-tight font-inter">Attendance Records</h2>
+    <div class="flex gap-3">
+        <a href="{% url 'manual_attendance' %}"
+            class="bg-white border border-gray-200 text-gray-700 px-6 py-2 rounded-xl text-sm font-bold hover:bg-gray-50 transition-all">
+            Manual Entry
+        </a>
+        <a href="{% url 'face_scan' %}"
+            class="bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all">
+            Start Live Scan
+        </a>
+    </div>
+</header>
+
+<div class="px-8 py-4 bg-gray-50 border-b border-gray-200">
+    <form method="GET" action="{% url 'todays_attendance' %}" class="flex flex-wrap items-end gap-3">
+
+        <div class="flex flex-col gap-1">
+            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Filter by Date</label>
+            <input type="date" name="date" value="{{ current_date }}"
+                class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <div class="flex items-end gap-1">
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Month</label>
+                <select name="month"
+                    class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+                    <option value="">— Any Month —</option>
+                    {% for m in months %}
+                    <option value="{{ m.num }}" {% if current_month == m.num %}selected{% endif %}>{{ m.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Year</label>
+                <select name="year"
+                    class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+                    <option value="">— Any Year —</option>
+                    {% for y in years %}
+                    <option value="{{ y }}" {% if current_year == y %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-1">
+            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Student Name</label>
+            <input type="text" name="student_name" value="{{ search_name }}" placeholder="Search by name..."
+                class="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <button type="submit"
+            class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm">
+            Apply Filter
+        </button>
+        <a href="{% url 'todays_attendance' %}"
+            class="bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center">
+            <i class="fas fa-calendar-day mr-2 text-gray-400"></i> Direct Today
+        </a>
+    </form>
+</div>
+
+<div class="p-8">
+    <div class="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm">
+        <table class="w-full text-left">
+            <thead
+                class="bg-gray-50 text-gray-400 text-[10px] font-bold uppercase tracking-widest border-b border-gray-100">
+                <tr>
+                    <th class="px-8 py-5">Student</th>
+                    <th class="px-8 py-5">Time Captured</th>
+                    <th class="px-8 py-5">Method</th>
+                    <th class="px-8 py-5">Status</th>
+                    <th class="px-8 py-5 text-right">Edit</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+                {% for log in logs %}
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-8 py-5">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-gray-800">{{ log.student.user_profile.user.username }}</span>
+                            <span class="text-[10px] font-mono text-gray-400">{{ log.student.roll_number }}</span>
+                        </div>
+                    </td>
+                    <td class="px-8 py-5 text-sm text-gray-500 font-medium">
+                        {{ log.time|time:"h:i A" }}
+                    </td>
+                    <td class="px-8 py-5">
+                        <span class="text-[10px] font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded">BIOMETRIC</span>
+                    </td>
+                    <td class="px-8 py-5">
+                        <span
+                            class="inline-flex items-center gap-1.5 {% if log.status == 'Present' %}text-green-700 bg-green-50{% elif log.status == 'Absent' %}text-red-700 bg-red-50{% else %}text-orange-700 bg-orange-50{% endif %} px-3 py-1 rounded-full text-[10px] font-bold">
+                            {{ log.status|upper }}
+                        </span>
+                    </td>
+                    <td class="px-8 py-5 text-right">
+                        <a href="{% url 'edit_attendance' log.id %}"
+                            class="text-gray-400 hover:text-blue-600 transition-all">
+                            <i class="fas fa-edit text-sm"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" class="px-8 py-20 text-center">
+                        <div class="max-w-xs mx-auto">
+                            <i class="fas fa-history text-4xl text-gray-100 mb-4"></i>
+                            <p class="text-gray-400 text-sm font-medium">No attendance records found for this criteria.
+                            </p>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

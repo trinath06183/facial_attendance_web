@@ -1,0 +1,233 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SmartAttend AI{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .sidebar-link:hover {
+            background-color: rgba(59, 130, 246, 0.05);
+            color: #2563eb;
+        }
+
+        .active-link {
+            background-color: rgba(59, 130, 246, 0.1);
+            color: #2563eb;
+            border-right: 4px solid #2563eb;
+            font-weight: 600;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 min-h-screen {% if user.is_authenticated and show_sidebar %}flex{% endif %}">
+
+    {% if user.is_authenticated and show_sidebar %}
+    <aside class="w-64 bg-white border-r border-gray-200 flex flex-col sticky top-0 h-screen shrink-0">
+        <div class="p-6">
+            <a href="{% url 'home' %}" class="text-xl font-bold text-blue-600 flex items-center gap-2">
+                <i class="fas fa-camera-retro"></i> SmartAttend
+            </a>
+        </div>
+
+        <nav class="flex-1 px-4 space-y-1 overflow-y-auto">
+            {% if user.is_superuser or user.userprofile.role == 'admin' %}
+            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2">Admin Menu</p>
+
+            <a href="{% url 'register_student' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-user-plus w-5"></i> Register Student
+            </a>
+
+            <div class="group relative">
+                <a href="{% url 'face_scan' %}"
+                    class="sidebar-link flex items-center justify-between px-3 py-2 rounded-lg text-blue-600 bg-blue-50/50 transition-all text-sm font-semibold">
+                    <span class="flex items-center gap-3"><i class="fas fa-video w-5"></i> Start Recognition</span>
+                </a>
+            </div>
+
+            <a href="{% url 'view_all_students' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-users w-5"></i> View All Students
+            </a>
+
+            <a href="{% url 'todays_attendance' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-calendar-day w-5"></i> View Attendance
+            </a>
+
+            <a href="{% url 'export_reports_page' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-file-export w-5 text-blue-400"></i> Export Reports (CSV/PDF)
+            </a>
+
+            <a href="{% url 'manage_settings' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-sliders-h w-5 text-gray-400"></i> App Settings
+            </a>
+
+            <hr class="my-4 border-gray-100">
+
+            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2">User Management</p>
+            <a href="{% url 'register_teacher' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-chalkboard-teacher w-5"></i> Register Teacher
+            </a>
+
+            {% elif user.userprofile.role == 'teacher' %}
+            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-4">Teacher Panel</p>
+
+            <a href="{% url 'face_scan' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-blue-600 bg-blue-50 font-bold text-sm">
+                <i class="fas fa-video w-5"></i> Start Recognition
+            </a>
+
+            <a href="{% url 'view_all_students' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-users w-5"></i> View All Students
+            </a>
+
+            <a href="{% url 'manual_attendance' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-edit w-5"></i> Manual Attendance
+            </a>
+
+            <a href="{% url 'todays_attendance' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-calendar-check w-5"></i> View Attendance
+            </a>
+
+            <a href="{% url 'export_reports_page' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-file-export w-5"></i> Export Reports
+            </a>
+            {% else %}
+            <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2">Student Portal</p>
+
+            <a href="{% url 'student_dashboard' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-calendar-check w-5"></i> My Attendance
+            </a>
+
+            <a href="{% url 'student_profile' %}"
+                class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
+                <i class="fas fa-user-circle w-5"></i> My Profile
+            </a>
+            {% endif %}
+
+            <hr class="my-4 border-gray-100">
+        </nav>
+
+        <div class="px-4 pb-4 space-y-4">
+            <!-- Hardware Control Section (Context-Aware) -->
+            <div id="hardware-control-section" class="hidden">
+                <div class="bg-red-50 border border-red-100 rounded-2xl p-3 animate-pulse">
+                    <p class="text-[9px] font-black text-red-500 uppercase tracking-tighter mb-2">Camera Active</p>
+                    <button onclick="releaseCamera()"
+                        class="w-full flex items-center justify-center gap-2 py-2 bg-red-600 text-white rounded-xl text-xs font-bold uppercase transition-all hover:bg-red-700">
+                        <i class="fas fa-video-slash"></i> Stop Camera
+                    </button>
+                </div>
+            </div>
+
+            <hr class="border-gray-100">
+
+            <!-- User Profile Area -->
+            <div class="bg-gray-50/50 rounded-2xl p-3">
+                <div class="flex items-center gap-3 px-2 mb-3">
+                    <div
+                        class="h-8 w-8 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold text-xs uppercase">
+                        {{ user.username|slice:":1" }}
+                    </div>
+                    <div class="flex flex-col min-w-0">
+                        <span class="text-sm font-semibold text-gray-800 truncate">{{ user.username }}</span>
+                        <span class="text-[9px] text-gray-400 uppercase font-bold tracking-tighter">
+                            {% if user.is_superuser %}Administrator{% else %}{{ user.userprofile.role|title }}{% endif %}
+                        </span>
+                    </div>
+                </div>
+                <a href="{% url 'logout' %}"
+                    class="flex items-center gap-3 px-3 py-2 rounded-lg text-gray-500 hover:text-red-600 hover:bg-red-50 transition-all text-sm">
+                    <i class="fas fa-sign-out-alt w-5"></i> Logout
+                </a>
+            </div>
+            <p class="text-[9px] text-gray-300 text-center uppercase tracking-widest">&copy; 2026 SmartAttend</p>
+        </div>
+    </aside>
+    {% endif %}
+
+    <main class="flex-1 flex flex-col min-w-0">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        /**
+         * Monitors if the camera is likely active based on the current page 
+         */
+        function checkCameraStatus() {
+            const hardwareSection = document.getElementById('hardware-control-section');
+            const currentPath = window.location.pathname;
+
+            // Show the button if we are on a scanning page
+            if (currentPath.includes('face-scan') || currentPath.includes('enroll-face') || currentPath.includes('capture-face')) {
+                hardwareSection.classList.remove('hidden');
+                localStorage.setItem('camera_active', 'true');
+            } else {
+                // If we navigated away but didn't click "Stop", keep it visible as a reminder
+                const isActive = localStorage.getItem('camera_active');
+                if (isActive === 'true') {
+                    hardwareSection.classList.remove('hidden');
+                } else {
+                    hardwareSection.classList.add('hidden');
+                }
+            }
+        }
+
+        function releaseCamera() {
+            if (confirm("Disconnect camera hardware? This will stop any active face scanning sessions.")) {
+                fetch('{% url "stop_camera" %}')
+                    .then(response => {
+                        if (response.ok) {
+                            alert("Camera Hardware Released.");
+                            localStorage.setItem('camera_active', 'false');
+                            document.getElementById('hardware-control-section').classList.add('hidden');
+                        } else {
+                            alert("Hardware was already released or is not in use.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Hardware release failed", err);
+                        alert("Communication error with server.");
+                    });
+            }
+        }
+
+        window.addEventListener('beforeunload', function () {
+            navigator.sendBeacon('{% url "stop_camera" %}');
+        });
+
+        // Initialize status on load
+        document.addEventListener('DOMContentLoaded', () => {
+            checkCameraStatus();
+
+            // Active Link Highlighter
+            document.querySelectorAll('.sidebar-link').forEach(link => {
+                const href = link.getAttribute('href');
+                if (href && href !== '#' && window.location.pathname === href) {
+                    link.classList.add('active-link');
+                }
+            });
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

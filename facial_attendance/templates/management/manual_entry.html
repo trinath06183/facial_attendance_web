@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block title %}Manual Entry — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="p-8 bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <div>
+            <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight font-inter">Manual Attendance Override</h2>
+            <p class="mt-2 text-sm text-gray-500 font-medium">Select a student's roll number to view details and mark
+                attendance.</p>
+        </div>
+
+        <div class="flex flex-col md:flex-row gap-6">
+            <!-- Form Section -->
+            <div
+                class="w-full md:w-1/2 bg-white p-8 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between">
+                <form method="POST" id="attendanceForm" class="space-y-6 flex-1">
+                    {% csrf_token %}
+                    <div class="space-y-5">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Student
+                                Roll No.</label>
+                            <select name="student_id" id="studentSelect" required
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-mono text-gray-700">
+                                <option value="" disabled selected>-- Select Roll No --</option>
+                                {% for student in students %}
+                                <option value="{{ student.id }}" data-name="{{ student.user_profile.user.username }}"
+                                    data-dept="{{ student.department }}" data-roll="{{ student.roll_number }}"
+                                    data-enrolled="{% if student.user_profile.is_face_registered %}true{% else %}false{% endif %}">
+                                    {{ student.roll_number }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Override
+                                Status</label>
+                            <select name="status"
+                                class="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 text-gray-700">
+                                <option value="Present">Present</option>
+                                <option value="Late">Late</option>
+                                <option value="Absent">Absent</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="pt-6 border-t border-gray-100 mt-auto">
+                        <button type="submit" id="submitBtn" disabled
+                            class="w-full py-3.5 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-sm">
+                            Confirm Mark Attendance
+                        </button>
+                        <a href="{% url 'todays_attendance' %}"
+                            class="block text-center mt-4 text-sm text-gray-500 font-medium hover:text-gray-900 transition-colors">
+                            Cancel & Return
+                        </a>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Preview Card Section -->
+            <div
+                class="w-full md:w-1/2 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+                <div class="bg-gray-900 p-6 text-white">
+                    <h3 class="font-bold text-lg">Student Profile Preview</h3>
+                    <p class="text-gray-400 text-xs mt-1">Select a roll number to load data</p>
+                </div>
+
+                <div
+                    class="p-8 flex-1 flex flex-col justify-center relative bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-50/50 to-white">
+
+                    <!-- Empty State -->
+                    <div id="emptyState" class="text-center">
+                        <div
+                            class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300">
+                            <i class="fas fa-id-card text-2xl"></i>
+                        </div>
+                        <p class="text-gray-400 text-sm font-medium">Waiting for selection...</p>
+                    </div>
+
+                    <!-- Profile Data (Hidden initially) -->
+                    <div id="profileData" class="hidden space-y-6">
+                        <div class="flex items-center gap-5">
+                            <div class="w-16 h-16 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-2xl font-black shadow-inner"
+                                id="previewInitial">
+                                X
+                            </div>
+                            <div>
+                                <h4 class="text-2xl font-black text-gray-900 tracking-tight" id="previewName">Name</h4>
+                                <span
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold font-mono bg-gray-100 text-gray-600 mt-1"
+                                    id="previewRoll">
+                                    Roll No
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 pt-6 border-t border-gray-100">
+                            <div>
+                                <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Department</p>
+                                <p class="font-semibold text-gray-800" id="previewDept">Dept</p>
+                            </div>
+                            <div>
+                                <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Biometrics</p>
+                                <div id="previewBioStatus"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const select = document.getElementById('studentSelect');
+        const emptyState = document.getElementById('emptyState');
+        const profileData = document.getElementById('profileData');
+        const submitBtn = document.getElementById('submitBtn');
+
+        select.addEventListener('change', function () {
+            const option = this.options[this.selectedIndex];
+
+            if (option.value) {
+                // Remove empty state, show profile
+                emptyState.classList.add('hidden');
+                profileData.classList.remove('hidden');
+                submitBtn.disabled = false;
+
+                // Populate data
+                const name = option.getAttribute('data-name');
+                const roll = option.getAttribute('data-roll');
+                const dept = option.getAttribute('data-dept');
+                const isEnrolled = option.getAttribute('data-enrolled') === 'true';
+
+                document.getElementById('previewName').textContent = name;
+                document.getElementById('previewRoll').textContent = roll;
+                document.getElementById('previewDept').textContent = dept;
+                document.getElementById('previewInitial').textContent = name.charAt(0).toUpperCase();
+
+                // Update bio UI
+                const bioContainer = document.getElementById('previewBioStatus');
+                if (isEnrolled) {
+                    bioContainer.innerHTML = `<span class="inline-flex items-center gap-1.5 text-green-700 bg-green-50 px-2 py-1 rounded text-xs font-bold border border-green-200"><i class="fas fa-check-circle"></i> Enrolled</span>`;
+                } else {
+                    bioContainer.innerHTML = `<span class="inline-flex items-center gap-1.5 text-orange-700 bg-orange-50 px-2 py-1 rounded text-xs font-bold border border-orange-200"><i class="fas fa-exclamation-triangle"></i> Pending</span>`;
+                }
+            } else {
+                emptyState.classList.remove('hidden');
+                profileData.classList.add('hidden');
+                submitBtn.disabled = true;
+            }
+        });
+    });
+</script>
+{% endblock %}

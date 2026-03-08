@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}My Attendance — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="p-8 bg-white min-h-screen">
+    <header class="flex justify-between items-center mb-10">
+        <div>
+            <h1 class="text-3xl font-black text-gray-900">Hello, {{ user.username }}</h1>
+            <p class="text-gray-400 text-sm">Here's a summary of your attendance history.</p>
+        </div>
+        <div class="flex gap-3">
+            <a href="{% url 'student_export_pdf' %}?start_date={{ start_date }}&end_date={{ end_date }}"
+                class="px-5 py-2.5 bg-gray-900 text-white rounded-xl text-sm font-bold shadow-lg shadow-gray-100 hover:bg-black transition-all">
+                <i class="fas fa-file-pdf mr-2"></i> Export Report
+            </a>
+        </div>
+    </header>
+
+    <div class="space-y-6">
+        <div class="bg-gray-50 rounded-3xl p-8 border border-gray-100">
+            <h3 class="font-bold text-gray-800 mb-6">Attendance Overview</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="bg-indigo-50 border border-indigo-100 p-8 rounded-3xl">
+                    <p class="text-indigo-600 text-xs font-bold uppercase tracking-widest mb-1">Total Presence</p>
+                    <p class="text-5xl font-black text-indigo-900">{{ presence_percentage|default:"--" }}% <span
+                            class="text-xl font-normal text-indigo-400">avg</span></p>
+                </div>
+                <div class="bg-orange-50 border border-orange-100 p-8 rounded-3xl">
+                    <p class="text-orange-600 text-xs font-bold uppercase tracking-widest mb-1">Classes Missed</p>
+                    <p class="text-5xl font-black text-orange-900">{{ classes_missed|default:"0" }}</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                <h3 class="font-bold text-gray-800 text-lg flex items-center gap-2">
+                    <i class="fas fa-history text-blue-500"></i> Attendance History
+                </h3>
+                <form method="GET" class="flex flex-wrap items-center gap-2 text-sm z-10 relative">
+                    <input type="date" name="start_date" value="{{ start_date }}"
+                        class="px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 focus:outline-none focus:border-blue-500">
+                    <span class="text-gray-400">to</span>
+                    <input type="date" name="end_date" value="{{ end_date }}"
+                        class="px-3 py-1.5 border border-gray-200 rounded-lg text-gray-600 focus:outline-none focus:border-blue-500">
+                    <button type="submit"
+                        class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold rounded-lg hover:bg-blue-100 transition">Filter</button>
+                    {% if start_date or end_date %}
+                    <a href="{% url 'dashboard' %}"
+                        class="px-3 py-1.5 text-gray-500 hover:text-gray-700 font-bold">Clear</a>
+                    {% endif %}
+                </form>
+            </div>
+            <div class="overflow-hidden rounded-2xl border border-gray-100 relative z-0">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 border-b border-gray-100">
+                        <tr>
+                            <th class="p-4 font-bold text-gray-600">Date</th>
+                            <th class="p-4 font-bold text-gray-600">Time</th>
+                            <th class="p-4 font-bold text-gray-600">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        {% for record in recent_attendance %}
+                        <tr>
+                            <td class="p-4 text-gray-700 font-medium">{{ record.date|date:"M d, Y" }}</td>
+                            <td class="p-4 text-gray-700 font-mono text-xs">{{ record.time|time:"h:i A" }}</td>
+                            <td class="p-4">
+                                <span
+                                    class="px-3 py-1 bg-green-50 text-green-700 text-[10px] font-bold uppercase tracking-wider rounded-full border border-green-100">
+                                    {% if record.status %}{{ record.status }}{% else %}Unknown{% endif %}
+                                </span>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3" class="p-4 text-gray-500 text-center text-xs">No attendance records yet.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

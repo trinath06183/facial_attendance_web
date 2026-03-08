@@ -1,0 +1,21 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database
+db.sqlite3
+
+# Project specific folders (if they are dynamically generated or very large)
+datasets/
+trainer/
+
+# VSCode or other IDEs
+.vscode/
+.idea/
+*.swp

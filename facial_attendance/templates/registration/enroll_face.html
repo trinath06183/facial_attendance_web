@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+{% block title %}Step 2: Face Enrollment — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-white flex flex-col items-center justify-center p-8">
+    <div class="text-center mb-10">
+        <h1 class="text-3xl font-extrabold text-gray-900 tracking-tight font-inter">Step 2: Biometric Enrollment</h1>
+        <p class="text-gray-500 mt-2 font-medium">Position your face within the frame and look directly at the camera.
+        </p>
+    </div>
+
+    <div class="relative bg-gray-50 p-4 rounded-3xl border border-gray-100 shadow-inner group">
+        <div
+            class="absolute inset-0 border-2 border-blue-500/10 rounded-2xl pointer-events-none z-10 transition-colors group-hover:border-blue-500/30">
+        </div>
+
+        <!-- HTML5 Video to capture the stream from JS -->
+        <video id="videoElement" autoplay playsinline
+            class="rounded-2xl w-[640px] h-[480px] object-cover bg-black shadow-2xl border-4 border-white"
+            style="transform: scaleX(-1);"></video>
+        <!-- Hidden canvas for capturing frames -->
+        <canvas id="captureCanvas" width="640" height="480" style="display:none;"></canvas>
+
+        <!-- Border Frames -->
+        <div class="absolute top-8 left-8 w-12 h-12 border-t-4 border-l-4 border-blue-500 rounded-tl-xl z-20"></div>
+        <div class="absolute top-8 right-8 w-12 h-12 border-t-4 border-r-4 border-blue-500 rounded-tr-xl z-20"></div>
+        <div class="absolute bottom-8 left-8 w-12 h-12 border-b-4 border-l-4 border-blue-500 rounded-bl-xl z-20"></div>
+        <div class="absolute bottom-8 right-8 w-12 h-12 border-b-4 border-r-4 border-blue-500 rounded-br-xl z-20"></div>
+
+        <!-- Scanning progress overlay (hidden by default) -->
+        <div id="processing-overlay"
+            class="hidden absolute inset-0 bg-blue-600/20 backdrop-blur-sm z-30 flex flex-col items-center justify-center rounded-2xl">
+            <div class="w-16 h-16 border-4 border-white/30 border-t-white rounded-full animate-spin mb-4"></div>
+            <p id="progress-text" class="text-white font-bold text-lg">Capturing Biometrics... (0/50)</p>
+            <p class="text-white/80 text-sm mt-1">Please keep still and face the camera directly</p>
+        </div>
+    </div>
+
+    <div class="mt-12 flex items-center gap-6">
+        <button id="capture-btn"
+            class="px-10 py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 hover:scale-105 active:scale-95 transition-all shadow-xl shadow-blue-100 flex items-center gap-3">
+            <i class="fas fa-camera"></i> Capture & Register Face
+        </button>
+        <button onclick="abortEnrollment()"
+            class="px-8 py-4 bg-white border border-gray-200 text-gray-500 font-bold rounded-2xl hover:bg-gray-50 transition-all">
+            Cancel
+        </button>
+    </div>
+</div>
+
+<style>
+    /* Scanning Bar Animation */
+    @keyframes scan {
+
+        0%,
+        100% {
+            top: 4%;
+            opacity: 0;
+        }
+
+        10%,
+        90% {
+            opacity: 1;
+        }
+
+        50% {
+            top: 96%;
+        }
+    }
+
+    .animate-scan {
+        animation: scan 3s ease-in-out infinite;
+    }
+</style>
+
+<script>
+    const video = document.getElementById('videoElement');
+    const captureCanvas = document.getElementById('captureCanvas');
+    const captureCtx = captureCanvas.getContext('2d');
+
+    let isCapturing = false;
+
+    // Start Webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+            video.srcObject = stream;
+        })
+        .catch(err => {
+            console.error("Error accessing webcam: ", err);
+            alert("Please allow camera access to use this feature.");
+        });
+
+    function abortEnrollment() {
+        if (confirm("Are you sure you want to cancel the face enrollment?")) {
+            isCapturing = false;
+            window.location.href = "{% url 'dashboard' %}";
+        }
+    }
+
+    document.getElementById('capture-btn').addEventListener('click', function () {
+        const btn = this;
+        const overlay = document.getElementById('processing-overlay');
+        const textEl = document.getElementById('progress-text');
+
+        // Disable UI
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        overlay.classList.remove('hidden');
+        isCapturing = true;
+
+        captureNextFrame();
+
+        function captureNextFrame() {
+            if (!isCapturing) return;
+
+            captureCtx.drawImage(video, 0, 0, 640, 480);
+            const imageData = captureCanvas.toDataURL('image/jpeg', 0.8);
+
+            fetch("{% url 'capture_enrollment_frame' %}", {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: imageData })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'error') {
+                        alert(data.message);
+                        resetUI();
+                        return;
+                    }
+
+                    if (data.status === 'capturing') {
+                        if (textEl) textEl.innerText = `Capturing Biometrics... (${data.progress}/50)`;
+                        setTimeout(captureNextFrame, 100);
+                    } else if (data.status === 'complete') {
+                        if (textEl) textEl.innerText = `Training AI Model... Please wait.`;
+                        isCapturing = false;
+
+                        // Now trigger the actual training
+                        fetch("{% url 'save_face_data' %}")
+                            .then(res => res.json())
+                            .then(result => {
+                                if (result.status === 'success') {
+                                    overlay.innerHTML = `
+                                    <div class="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-lg scale-110">
+                                        <i class="fas fa-check text-green-500 text-2xl"></i>
+                                    </div>
+                                    <p class="text-white font-bold text-xl tracking-tight">Enrollment Complete</p>
+                                    <p class="text-white/80 text-sm mt-1">Redirecting to Dashboard...</p>
+                                `;
+                                    setTimeout(() => { window.location.href = "{% url 'dashboard' %}"; }, 2000);
+                                } else {
+                                    alert("Error: " + (result.message || "Failed to train model."));
+                                    resetUI();
+                                }
+                            }).catch(e => {
+                                alert("Validation failed.");
+                                resetUI();
+                            });
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    resetUI();
+                });
+        }
+
+        function resetUI() {
+            isCapturing = false;
+            overlay.classList.add('hidden');
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+    });
+</script>
+{% endblock %}

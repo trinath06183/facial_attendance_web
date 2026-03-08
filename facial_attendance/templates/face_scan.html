@@ -1,0 +1,333 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Face Scanner — SmartAttend{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex flex-col bg-white">
+    <header class="bg-white border-b border-gray-100 px-8 py-6 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Biometric Verification</h1>
+            <p class="text-gray-400 text-sm">System is actively scanning for registered profiles...</p>
+        </div>
+        <button onclick="cancelAndRedirect()"
+            class="px-6 py-2.5 border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all text-sm font-semibold">
+            Cancel Scanning
+        </button>
+    </header>
+
+    <div class="flex flex-1 p-8 gap-8">
+        <div
+            class="flex-[2] flex flex-col items-center justify-center bg-gray-50 rounded-3xl border border-gray-100 relative overflow-hidden shadow-inner">
+            <div class="relative">
+                <div class="absolute inset-0 border-2 border-blue-500/20 rounded-xl pointer-events-none z-10"></div>
+                <!-- HTML5 Video to capture the stream from JS -->
+                <video id="videoElement" autoplay playsinline
+                    class="rounded-xl w-[720px] h-[540px] object-cover bg-black shadow-2xl"
+                    style="transform: scaleX(-1);"></video>
+                <canvas id="overlayCanvas" width="640" height="480"
+                    class="absolute top-0 left-0 w-full h-full pointer-events-none z-20"></canvas>
+                <!-- Hidden canvas for capturing frames -->
+                <canvas id="captureCanvas" width="640" height="480" style="display:none;"></canvas>
+
+                <!-- Scanner Corners and Scanning Bar Container -->
+                <div class="absolute inset-0 z-20 overflow-hidden pointer-events-none rounded-xl"
+                    style="padding: 10px;">
+                    <!-- Top Left -->
+                    <div class="absolute top-4 left-4 w-12 h-12 border-t-4 border-l-4 border-blue-500 rounded-tl-lg">
+                    </div>
+                    <!-- Top Right -->
+                    <div class="absolute top-4 right-4 w-12 h-12 border-t-4 border-r-4 border-blue-500 rounded-tr-lg">
+                    </div>
+                    <!-- Bottom Left -->
+                    <div class="absolute bottom-4 left-4 w-12 h-12 border-b-4 border-l-4 border-blue-500 rounded-bl-lg">
+                    </div>
+                    <!-- Bottom Right -->
+                    <div
+                        class="absolute bottom-4 right-4 w-12 h-12 border-b-4 border-r-4 border-blue-500 rounded-br-lg">
+                    </div>
+
+                    <!-- Scanning Bar -->
+                    <div
+                        class="absolute left-4 right-4 h-0.5 bg-blue-500 shadow-[0_0_15px_3px_rgba(59,130,246,0.6)] animate-scan">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex-1 bg-white border border-gray-100 rounded-3xl p-6 shadow-sm flex flex-col max-h-[600px]">
+            <h3 class="text-lg font-bold text-gray-800 mb-6 flex items-center gap-2">
+                <i class="fas fa-id-card text-blue-600"></i> Identified Profiles
+            </h3>
+
+            <div id="detection-list" class="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                <div id="no-detection" class="text-center py-20">
+                    <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <i class="fas fa-user-slash text-gray-300"></i>
+                    </div>
+                    <p class="text-gray-400 text-sm">Waiting for face detection...</p>
+                </div>
+            </div>
+
+            <div class="mt-auto pt-6 border-t border-gray-100">
+                <div class="bg-blue-50 p-4 rounded-2xl flex items-center gap-3">
+                    <div class="animate-pulse h-2 w-2 bg-blue-600 rounded-full"></div>
+                    <span class="text-xs font-bold text-blue-700 uppercase tracking-widest">Live Processing</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #f1f1f1;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #e2e8f0;
+        border-radius: 10px;
+    }
+
+    @keyframes fade-in-down {
+        0% {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        100% {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .animate-fade-in-down {
+        animation: fade-in-down 0.5s ease-out forwards;
+    }
+
+    /* Scanning Bar Animation */
+    @keyframes scan {
+
+        0%,
+        100% {
+            top: 4%;
+            opacity: 0;
+        }
+
+        10%,
+        90% {
+            opacity: 1;
+        }
+
+        50% {
+            top: 96%;
+        }
+    }
+
+    .animate-scan {
+        animation: scan 3s ease-in-out infinite;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const video = document.getElementById('videoElement');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const captureCanvas = document.getElementById('captureCanvas');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const captureCtx = captureCanvas.getContext('2d');
+
+    let isProcessing = false;
+
+    // Start Webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => {
+            video.srcObject = stream;
+        })
+        .catch(err => {
+            console.error("Error accessing webcam: ", err);
+            alert("Please allow camera access to use this feature.");
+        });
+
+    // Flip the canvas context horizontally to match the scaleX(-1) on the video
+    overlayCtx.translate(640, 0);
+    overlayCtx.scale(-1, 1);
+
+    function processFrame() {
+        if (!video.videoWidth || isProcessing) {
+            requestAnimationFrame(processFrame);
+            return;
+        }
+
+        isProcessing = true;
+        captureCtx.drawImage(video, 0, 0, 640, 480);
+        const imageData = captureCanvas.toDataURL('image/jpeg', 0.8);
+
+        fetch("{% url 'process_client_frame' %}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ image: imageData })
+        })
+            .then(response => response.json())
+            .then(data => {
+                overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+                if (data.status === 'success') {
+                    // Draw Liveness HUD
+                    overlayCtx.save();
+                    overlayCtx.scale(-1, 1); // unflip text
+                    if (data.liveness) {
+                        overlayCtx.fillStyle = 'rgba(0, 80, 0, 0.7)';
+                        overlayCtx.fillRect(-640, 440, 640, 40);
+                        overlayCtx.fillStyle = 'rgb(0, 255, 100)';
+                        overlayCtx.font = 'bold 16px Arial';
+                        overlayCtx.fillText("  LIVENESS VERIFIED  -  Blink Detected!", -630, 465);
+                    } else {
+                        overlayCtx.fillStyle = 'rgba(0, 50, 100, 0.7)';
+                        overlayCtx.fillRect(-640, 440, 640, 40);
+                        overlayCtx.fillStyle = 'rgb(0, 200, 255)';
+                        overlayCtx.font = 'bold 14px Arial';
+                        overlayCtx.fillText("  Please blink once to verify liveness...", -630, 465);
+                    }
+                    overlayCtx.restore();
+
+                    // Draw rectangles & labels
+                    data.draw.forEach(cmd => {
+                        if (cmd.type === 'rect') {
+                            overlayCtx.strokeStyle = cmd.color;
+                            overlayCtx.lineWidth = 2;
+                            overlayCtx.strokeRect(cmd.x, cmd.y, cmd.w, cmd.h);
+
+                            overlayCtx.fillStyle = cmd.color;
+                            overlayCtx.font = 'bold 16px Arial';
+                            let textW = overlayCtx.measureText(cmd.label).width;
+                            overlayCtx.fillRect(cmd.x, cmd.y - 25, Math.max(cmd.w, textW + 10), 25);
+
+                            // Unflip text so it is readable
+                            overlayCtx.save();
+                            overlayCtx.scale(-1, 1);
+                            overlayCtx.fillStyle = 'white';
+                            overlayCtx.fillText(cmd.label, -(cmd.x + 5) - Math.max(cmd.w, textW + 10) + textW + 10, cmd.y - 7);
+                            overlayCtx.restore();
+                        }
+                    });
+                }
+            })
+            .catch(err => console.error(err))
+            .finally(() => {
+                isProcessing = false;
+                setTimeout(processFrame, 150);
+            });
+    }
+
+    video.addEventListener('play', () => {
+        setTimeout(processFrame, 150);
+    });
+
+    /**
+     * Cancel scanning and redirect to Dashboard
+     */
+    function cancelAndRedirect() {
+        fetch('{% url "stop_camera" %}').finally(() => {
+            window.location.href = "{% url 'dashboard' %}";
+        });
+    }
+
+    const seenUsers = new Set();
+    const detectionList = document.getElementById('detection-list');
+    const noDetection = document.getElementById('no-detection');
+
+    function updateRecognitionPanel() {
+        fetch("{% url 'check_face_status' %}")
+            .then(response => response.json())
+            .then(data => {
+                // CASE 1: LOGIN REDIRECTION
+                if (data.status === 'redirect') {
+                    noDetection.classList.add('hidden');
+                    const card = createStatusCard(data, 'LOGGING IN...', 'bg-blue-600', 'border-blue-200 bg-blue-50');
+                    detectionList.prepend(card);
+
+                    setTimeout(() => {
+                        window.location.href = data.url;
+                    }, 1500);
+                    return;
+                }
+
+                // CASE 2: ATTENDANCE MARKING
+                if (data.status === 'success_marked' || data.status === 'already_marked' || data.status === 'identified_only') {
+                    noDetection.classList.add('hidden');
+
+                    // Prevent duplicates in the same session while standing in front of camera
+                    if (seenUsers.has(data.name)) return;
+                    seenUsers.add(data.name);
+
+                    const isNew = data.status === 'success_marked';
+                    const isAlready = data.status === 'already_marked';
+
+                    let statusText = 'IDENTIFIED';
+                    let labelColor = 'bg-gray-600';
+                    let borderColor = 'border-gray-100 bg-gray-50';
+
+                    if (isNew) {
+                        statusText = 'MARKED PRESENT';
+                        labelColor = 'bg-green-600';
+                        borderColor = 'border-green-200 bg-green-50';
+                    } else if (isAlready) {
+                        statusText = 'ALREADY MARKED';
+                        labelColor = 'bg-orange-600';
+                        borderColor = 'border-orange-200 bg-orange-50';
+                    }
+
+                    const card = createStatusCard(data, statusText, labelColor, borderColor);
+                    detectionList.prepend(card);
+
+                    // Reset recognition state on server so the same person can be recognized again later
+                    // but not immediately spamming the sidebar
+                    setTimeout(() => {
+                        fetch("{% url 'reset_session' %}");
+                        // Optional: remove from "seen" after some time so they can be re-scanned
+                        setTimeout(() => seenUsers.delete(data.name), 5000);
+                    }, 2000);
+                }
+            })
+            .catch(err => console.error("Recognition poll failed", err));
+    }
+
+    function createStatusCard(data, statusText, labelColor, borderColor) {
+        const card = document.createElement('div');
+        card.className = `p-4 rounded-2xl border ${borderColor} animate-fade-in-down mb-3`;
+        card.innerHTML = `
+            <div class="flex items-center gap-4">
+                <div class="h-12 w-12 rounded-full ${labelColor} flex items-center justify-center text-white font-bold text-lg">
+                    ${data.name.charAt(0).toUpperCase()}
+                </div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-start">
+                        <h4 class="font-bold text-gray-900">${data.name}</h4>
+                        <span class="text-[8px] font-black uppercase px-2 py-0.5 rounded ${labelColor} text-white">
+                            ${statusText}
+                        </span>
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-1">ID: ${data.roll_number || 'SYSTEM'}</p>
+                    ${data.time ? `
+                    <div class="flex gap-3 mt-2 text-[9px] text-gray-400 font-medium">
+                        <span><i class="fas fa-clock mr-1"></i> ${data.time}</span>
+                        <span><i class="fas fa-calendar mr-1"></i> ${data.date}</span>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+        return card;
+    }
+
+    // Faster polling for better real-time feel
+    setInterval(updateRecognitionPanel, 1000);
+</script>
+{% endblock %}
