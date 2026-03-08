@@ -28,15 +28,21 @@ from django.core.files.base import ContentFile
 
 
 
+from django.conf import settings
+
 # --- Global Classifiers ---
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
 
+DATASETS_DIR = os.path.join(settings.BASE_DIR, 'datasets')
+TRAINER_DIR = os.path.join(settings.BASE_DIR, 'trainer')
+TRAINER_FILE = os.path.join(TRAINER_DIR, 'trainer.yml')
+
 def get_current_recognizer():
     recognizer = cv2.face.LBPHFaceRecognizer_create()
-    if os.path.exists('trainer/trainer.yml'):
+    if os.path.exists(TRAINER_FILE):
         try:
-            recognizer.read('trainer/trainer.yml')
+            recognizer.read(TRAINER_FILE)
         except:
             pass
     return recognizer
@@ -787,11 +793,11 @@ def capture_enrollment_frame_api(request):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
         
-        if not os.path.exists('datasets'): os.makedirs('datasets')
+        if not os.path.exists(DATASETS_DIR): os.makedirs(DATASETS_DIR)
         
         for (x, y, w, h) in faces:
             progress += 1
-            cv2.imwrite(f"datasets/User.{user_id}.{progress}.jpg", gray[y:y+h, x:x+w])
+            cv2.imwrite(os.path.join(DATASETS_DIR, f"User.{user_id}.{progress}.jpg"), gray[y:y+h, x:x+w])
             request.session['capture_progress'] = progress
             break # only 1 face per frame to avoid jumping progress
             
@@ -802,7 +808,7 @@ def capture_enrollment_frame_api(request):
 
 
 def capture_face_samples(request, user_id):
-    if not os.path.exists('datasets'): os.makedirs('datasets')
+    if not os.path.exists(DATASETS_DIR): os.makedirs(DATASETS_DIR)
     
     # We use a local camera object here to not interfere with the global stream
     cam = cv2.VideoCapture(0)
@@ -816,7 +822,7 @@ def capture_face_samples(request, user_id):
         faces = detector.detectMultiScale(gray, 1.3, 5)
         for (x, y, w, h) in faces:
             count += 1
-            cv2.imwrite(f"datasets/User.{user_id}.{count}.jpg", gray[y:y+h, x:x+w])
+            cv2.imwrite(os.path.join(DATASETS_DIR, f"User.{user_id}.{count}.jpg"), gray[y:y+h, x:x+w])
         
         if count >= 50: break
         time.sleep(0.05) 
@@ -838,7 +844,7 @@ def capture_face_samples(request, user_id):
     return redirect('dashboard')
 
 def run_trainer_logic():
-    path = 'datasets'
+    path = DATASETS_DIR
     if not os.path.exists(path) or not os.listdir(path): return False
     
     recognizer = cv2.face.LBPHFaceRecognizer_create()
@@ -858,9 +864,9 @@ def run_trainer_logic():
         except: continue
         
     if ids:
-        if not os.path.exists('trainer'): os.makedirs('trainer')
+        if not os.path.exists(TRAINER_DIR): os.makedirs(TRAINER_DIR)
         recognizer.train(faceSamples, np.array(ids))
-        recognizer.write('trainer/trainer.yml')
+        recognizer.write(TRAINER_FILE)
         return True
     return False
 
