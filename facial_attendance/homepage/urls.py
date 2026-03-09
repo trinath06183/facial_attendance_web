@@ -22,6 +22,8 @@ urlpatterns = [
     path('settings/', views.manage_settings, name='manage_settings'),
     path('today-attendance/', views.todays_attendance, name='todays_attendance'),
     path('manual-entry/', views.manual_attendance, name='manual_attendance'),
+    path('mark-absent-quick/', views.mark_absent_quick, name='mark_absent_quick'),
+    path('mark-all-absent/', views.mark_all_absent, name='mark_all_absent'),
     path('remove-student/<int:student_id>/', views.remove_student, name='remove_student'),
     path('remove-teacher/<int:teacher_id>/', views.remove_teacher, name='remove_teacher'),
     path('edit-student/<int:student_id>/', views.edit_student, name='edit_student'),
@@ -44,3 +46,4 @@ urlpatterns = [
     path('reset-session/', views.reset_recognition_session, name='reset_session'),
     path('check-face-status/', views.check_face_status, name='check_face_status'),
 ]
+# Force Django reload

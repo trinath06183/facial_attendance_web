@@ -22,6 +22,7 @@
       <div class="mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
         <input type="text" name="username" placeholder="Enter your username"
+          value="{{ u_name|default:'' }}"
           class="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
           required />
       </div>
@@ -34,10 +35,18 @@
       </div>
 
       <div class="flex flex-col gap-3">
-        <button type="submit"
-          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors shadow-sm">
-          Sign In
-        </button>
+        {% if session_conflict %}
+          <input type="hidden" name="force_login" value="true">
+          <button type="submit"
+            class="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+            Terminate Previous Session & Login
+          </button>
+        {% else %}
+          <button type="submit"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+            Sign In
+          </button>
+        {% endif %}
         <a href="{% url 'home' %}"
           class="w-full bg-white hover:bg-gray-50 text-gray-600 font-medium py-2.5 rounded-lg text-sm transition-colors text-center border border-gray-200">
           Back to Home

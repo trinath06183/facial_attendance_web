@@ -47,7 +47,7 @@ def get_current_recognizer():
             pass
     return recognizer
 
-CLOSED_FRAMES_MIN = 2
+CLOSED_FRAMES_MIN = 1
 
 
 
@@ -68,7 +68,7 @@ def process_client_frame(request):
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(100, 100))
         
         # Session state initialization
         if 'eye_closed_frames' not in request.session:
@@ -90,7 +90,7 @@ def process_client_frame(request):
         for (x, y, fw, fh) in faces:
             # Blink Detection
             roi_gray = gray[y: y + fh // 2, x: x + fw]
-            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=5, minSize=(20, 20))
+            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.3, minNeighbors=4, minSize=(20, 20))
             
             if len(eyes) == 0:
                 eye_closed_frames += 1
@@ -192,11 +192,26 @@ def login_page(request):
             from django.contrib.sessions.models import Session
             from django.utils import timezone
             active_sessions = Session.objects.filter(expire_date__gte=timezone.now())
+            
+            force_login = request.POST.get('force_login') == 'true'
+            session_conflict = False
+            sessions_to_delete = []
+
             for session in active_sessions:
                 data = session.get_decoded()
                 if str(user.pk) == str(data.get('_auth_user_id')):
-                    messages.error(request, 'This account is currently logged in on another device. Please log out there or wait 10 minutes for inactivity timeout.')
-                    return render(request, 'login.html')
+                    if force_login:
+                        sessions_to_delete.append(session.session_key)
+                    else:
+                        session_conflict = True
+            
+            if session_conflict:
+                messages.error(request, 'This account is currently logged in on another device.')
+                return render(request, 'login.html', {'session_conflict': True, 'u_name': u_name})
+                
+            if force_login and sessions_to_delete:
+                Session.objects.filter(session_key__in=sessions_to_delete).delete()
+                messages.success(request, 'Previous sessions terminated.')
                     
             # Check if it's a teacher or student for 2FA
             is_teacher = hasattr(user, 'teacher_profile')
@@ -243,7 +258,7 @@ def verify_teacher_face(request):
     if not blink_detected:
         return JsonResponse({'status': 'pending', 'message': 'Please blink to verify liveness'})
         
-    if not (last_recognized_id and recognition_count >= 10):
+    if not (last_recognized_id and recognition_count >= 5):
         return JsonResponse({'status': 'pending'})
         
     if last_recognized_id == pending_id:
@@ -687,6 +702,12 @@ def todays_attendance(request):
     if query_name:
         logs = logs.filter(student__user_profile__user__username__icontains=query_name)
 
+    # Calculate unmarked students (only if a specific date is filtered, not month/year)
+    unmarked_students = []
+    if query_date and not (query_month and query_year):
+        marked_student_ids = logs.values_list('student_id', flat=True)
+        unmarked_students = Student.objects.exclude(id__in=marked_student_ids)
+
     # Build year range for dropdown (from 2020 to current year)
     years = list(range(today.year, 2019, -1))
     months = [
@@ -700,6 +721,7 @@ def todays_attendance(request):
 
     return render(request, 'management/attendance_today.html', {
         'logs': logs, 
+        'unmarked_students': unmarked_students,
         'show_sidebar': True,
         'current_date': query_date,
         'search_name': query_name,
@@ -726,11 +748,83 @@ def manual_attendance(request):
             
         return redirect('todays_attendance')
         
-    students = Student.objects.all()
+        students = Student.objects.all()
     return render(request, 'management/manual_entry.html', {
         'students': students, 
         'show_sidebar': True
     })
+
+@login_required
+def mark_absent_quick(request):
+    if not (request.user.is_superuser or request.user.userprofile.role in ['admin', 'teacher']):
+        return redirect('dashboard')
+        
+    if request.method == "POST":
+        student_id = request.POST.get('student_id')
+        target_date = request.POST.get('target_date')
+        
+        try:
+            from datetime import datetime
+            student = Student.objects.get(id=student_id)
+            # Create an Absent record for the specific date, at 11:59 PM to signify end-of-day missing
+            Attendance.objects.create(
+                student=student, 
+                status='Absent',
+                date=target_date,
+                time=datetime.strptime("23:59:59", "%H:%M:%S").time()
+            )
+            messages.success(request, f"Marked {student.user_profile.user.username} as Absent for {target_date}.")
+        except Student.DoesNotExist:
+            messages.error(request, "Student not found.")
+            
+        # Redirect back to the same filtered view
+        return redirect(f"/today-attendance/?date={target_date}")
+        
+    return redirect('todays_attendance')
+
+@login_required
+def mark_all_absent(request):
+    if not (request.user.is_superuser or request.user.userprofile.role in ['admin', 'teacher']):
+        return redirect('dashboard')
+        
+    if request.method == "POST":
+        target_date = request.POST.get('target_date')
+        
+        if not target_date:
+            return redirect('todays_attendance')
+        
+        try:
+            from datetime import datetime
+            
+            # Find all marked students for this date
+            marked_student_ids = Attendance.objects.filter(date=target_date).values_list('student_id', flat=True)
+            unmarked_students = Student.objects.exclude(id__in=marked_student_ids)
+            
+            # Create absent records
+            absent_records = []
+            for student in unmarked_students:
+                absent_records.append(
+                    Attendance(
+                        student=student, 
+                        status='Absent',
+                        date=target_date,
+                        time=datetime.strptime("23:59:59", "%H:%M:%S").time()
+                    )
+                )
+            
+            if absent_records:
+                Attendance.objects.bulk_create(absent_records)
+                messages.success(request, f"Successfully marked {len(absent_records)} students as Absent for {target_date}.")
+            else:
+                messages.info(request, f"No unmarked students found for {target_date}.")
+                
+        except Exception as e:
+            messages.error(request, f"An error occurred: {str(e)}")
+            
+        # Redirect back to the same filtered view
+        return redirect(f"/today-attendance/?date={target_date}")
+        
+    return redirect('todays_attendance')
 
 @login_required
 def remove_student(request, student_id):
@@ -882,7 +976,7 @@ def check_face_status(request):
     last_recognized_id = request.session.get('last_recognized_id')
     recognition_count = request.session.get('recognition_count', 0)
     
-    if not (last_recognized_id and recognition_count >= 10):
+    if not (last_recognized_id and recognition_count >= 5):
         return JsonResponse({'status': 'pending'})
         
     try:

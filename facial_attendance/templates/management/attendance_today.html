@@ -67,6 +67,20 @@
 </div>
 
 <div class="p-8">
+    {% if unmarked_students %}
+    <div class="mb-4 flex justify-end">
+        <form method="POST" action="{% url 'mark_all_absent' %}">
+            {% csrf_token %}
+            <input type="hidden" name="target_date" value="{{ current_date }}">
+            <button type="submit"
+                onclick="return confirm('Are you sure you want to mark ALL {{ unmarked_students|length }} unmarked students as ABSENT for {{ current_date }}?')"
+                class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm flex items-center gap-2">
+                <i class="fas fa-user-times"></i> Mark All Unmarked as Absent
+            </button>
+        </form>
+    </div>
+    {% endif %}
+
     <div class="bg-white rounded-3xl border border-gray-100 overflow-hidden shadow-sm">
         <table class="w-full text-left">
             <thead
@@ -107,7 +121,43 @@
                         </a>
                     </td>
                 </tr>
-                {% empty %}
+                {% endfor %}
+
+                {% for student in unmarked_students %}
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-8 py-5">
+                        <div class="flex flex-col">
+                            <span class="font-bold text-gray-800">{{ student.user_profile.user.username }}</span>
+                            <span class="text-[10px] font-mono text-gray-400">{{ student.roll_number }}</span>
+                        </div>
+                    </td>
+                    <td class="px-8 py-5 text-sm text-gray-400 italic">
+                        No Record
+                    </td>
+                    <td class="px-8 py-5">
+                        <span class="text-[10px] font-bold text-gray-300 bg-gray-50 px-2 py-1 rounded">N/A</span>
+                    </td>
+                    <td class="px-8 py-5">
+                        <span
+                            class="inline-flex items-center gap-1.5 text-gray-500 bg-gray-100 border border-gray-200 px-3 py-1 rounded-full text-[10px] font-bold">
+                            NOT MARKED
+                        </span>
+                    </td>
+                    <td class="px-8 py-5 text-right">
+                        <form method="POST" action="{% url 'mark_absent_quick' %}" class="inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="student_id" value="{{ student.id }}">
+                            <input type="hidden" name="target_date" value="{{ current_date }}">
+                            <button type="submit"
+                                class="text-[10px] font-bold text-red-600 bg-red-50 hover:bg-red-100 hover:text-red-700 px-3 py-1.5 rounded-lg transition-all border border-red-100">
+                                MARK ABSENT
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+
+                {% if not logs and not unmarked_students %}
                 <tr>
                     <td colspan="5" class="px-8 py-20 text-center">
                         <div class="max-w-xs mx-auto">
@@ -117,7 +167,7 @@
                         </div>
                     </td>
                 </tr>
-                {% endfor %}
+                {% endif %}
             </tbody>
         </table>
     </div>
