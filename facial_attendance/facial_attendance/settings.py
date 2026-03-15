@@ -132,5 +132,6 @@ SESSION_COOKIE_AGE = 600 # 10 minutes (in seconds)
 SESSION_SAVE_EVERY_REQUEST = True # Resets the 10-minute timer on any user activity
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True # Optional: Also log out if they close the browser tab
 
-
-
+# Media files (User Datasets)
+MEDIA_URL = '/datasets/'
+MEDIA_ROOT = BASE_DIR / 'datasets'

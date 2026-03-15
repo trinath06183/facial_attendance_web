@@ -1,37 +1,27 @@
-# Virtual Environment
+# Python dependencies
 venv/
-env/
-ENV/
-
-# Python Cache
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class
 
+# Environment variables
+.env
+
+# Node.js
+node_modules/
+package-lock.json
+
+# Tailwind/Build tools
+tailwindcss.exe
+dist/
+
+# Static files (built)
+facial_attendance/homepage/static/css/tailwind_built.css
+
+# OS files
+.DS_Store
+Thumbs.db
+
 # Database
 db.sqlite3
-
-# Project specific folders (if they are dynamically generated or very large)
-datasets/
-trainer/
-
-# VSCode or other IDEs
-.vscode/
-.idea/
-*.swp
-
-
-
-
-
-# git add .
-# git commit -m "Initial commit"
-# git remote add origin https://github.com/trinath06183/facial_attendance_web.git
-# git branch -M main
-# git push -u origin main
-
-
-
-# git add .
-# git commit -m "Initial commit"
-# git push -u origin main

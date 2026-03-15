@@ -102,7 +102,7 @@ def process_client_frame(request):
             # Face Recognition
             try:
                 user_id, confidence = recognizer.predict(gray[y:y+fh, x:x+fw])
-                if confidence < 75:
+                if confidence < 55:
                     from .models import UserProfile
                     try:
                         profile = UserProfile.objects.get(user_id=user_id)
@@ -143,7 +143,7 @@ def process_client_frame(request):
             else:
                 last_recognized_id = current_recognized_id
                 recognition_count = 1
-        elif not blink_detected:
+        else:
             recognition_count = 0
             last_recognized_id = None
             
