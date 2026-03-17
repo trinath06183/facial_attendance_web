@@ -748,6 +748,7 @@ def manual_attendance(request):
             
         return redirect('todays_attendance')
         
+    # Query all students for the manual entry form
     students = Student.objects.all()
     return render(request, 'management/manual_entry.html', {
         'students': students, 
