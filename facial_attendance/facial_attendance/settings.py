@@ -27,6 +27,11 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://subcandidly-piney-kurt.ngrok-free.dev',
+    'https://*.ngrok-free.dev',
+]
+
 
 # Application definition
 

@@ -101,23 +101,13 @@ def process_client_frame(request):
                 eye_history.pop(0)
 
             # Analyze history for a "blink signature": True -> False -> True
-            if len(eye_history) >= 5 and not blink_detected:
-                # We want to see: Eyes open recently, then closed recently, then open now.
-                # Example valid sequence: [True, True, False, False, True]
-                
-                # Check if eyes are open right now (last 2 frames)
-                currently_open = any(eye_history[-2:])
-                
-                # Check if eyes were closed just before that
-                closed_recently_window = eye_history[-6:-2]
-                was_closed = len(closed_recently_window) > 0 and not any(closed_recently_window)
-                
-                # Check if eyes were open before they were closed
-                previously_open_window = eye_history[:-6]
-                was_open_before = len(previously_open_window) > 0 and any(previously_open_window)
-                
-                if currently_open and was_closed and was_open_before:
-                    blink_detected = True
+            if len(eye_history) >= 3 and not blink_detected:
+                # Scan recent history for any open->closed->open transition
+                recent = eye_history[-10:]
+                for i in range(1, len(recent) - 1):
+                    if recent[i - 1] and not recent[i] and recent[i + 1]:
+                        blink_detected = True
+                        break
                 
             # Face Recognition
             try:
@@ -617,31 +607,40 @@ def register_student(request):
             email = form.cleaned_data.get('email')
             roll_no = form.cleaned_data.get('roll_number')
             dept = form.cleaned_data.get('department')
-            
+
+            # Friendly duplicate checks before creating anything
+            if Student.objects.filter(roll_number=roll_no).exists():
+                messages.error(request, f"Roll number '{roll_no}' is already registered. Please use a different roll number.")
+                return render(request, 'registration/register_student.html', {'form': form, 'show_sidebar': True})
+
+            if User.objects.filter(username=u_name).exists():
+                messages.error(request, f"Username '{u_name}' is already taken. Please choose a different username.")
+                return render(request, 'registration/register_student.html', {'form': form, 'show_sidebar': True})
+
             # Create the User
             new_user = User.objects.create_user(username=u_name, password=p_word, email=email)
-            
+
             # Create UserProfile
             profile = UserProfile.objects.create(
                 user=new_user,
                 role='student',
                 face_id=new_user.id
             )
-            
+
             # Create Student
             Student.objects.create(
                 user_profile=profile,
                 roll_number=roll_no,
                 department=dept
             )
-            
+
             # Store ID in session for face enrollment
             request.session['enroll_user_id'] = new_user.id
             messages.success(request, f"Details saved for {u_name}! Now let's capture the face.")
             return redirect('enroll_face')
     else:
         form = StudentRegistrationForm()
-        
+
     return render(request, 'registration/register_student.html', {
         'form': form,
         'show_sidebar': True
@@ -690,9 +689,11 @@ def view_all_students(request):
         return redirect('dashboard')
     
     students = Student.objects.all()
+    user_role = request.user.userprofile.role if hasattr(request.user, 'userprofile') else 'admin'
     return render(request, 'management/all_students.html', {
         'students': students, 
-        'show_sidebar': True
+        'show_sidebar': True,
+        'user_role': user_role,
     })
 
 @login_required
@@ -882,42 +883,56 @@ def capture_enrollment_frame_api(request):
     user_id = request.session.get('enroll_user_id')
     if not user_id:
         return JsonResponse({'status': 'error', 'message': 'No user in enrollment queue'})
-        
+
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST allowed'}, status=405)
-        
+
     try:
         data = json.loads(request.body)
         image_data = data.get('image')
         if not image_data:
             return JsonResponse({'error': 'No image provided'}, status=400)
-            
-        # Initialize progress in session
+
+        # Initialize progress & attempt counters in session
         if 'capture_progress' not in request.session:
             request.session['capture_progress'] = 0
-            
+            request.session['capture_attempts'] = 0
+
         progress = request.session['capture_progress']
-        
+        attempts = request.session.get('capture_attempts', 0)
+
         if progress >= 50:
-             return JsonResponse({'status': 'complete', 'progress': 50})
-             
-        format, imgstr = image_data.split(';base64,') 
+            return JsonResponse({'status': 'complete', 'progress': 50})
+
+        # Fail early if too many frames tried with no face detected
+        MAX_ATTEMPTS = 120
+        if attempts >= MAX_ATTEMPTS and progress == 0:
+            # Clean up session
+            request.session.pop('capture_progress', None)
+            request.session.pop('capture_attempts', None)
+            return JsonResponse({'status': 'error', 'message': 'No face detected. Please ensure your face is clearly visible and well-lit, then try again.'})
+
+        format, imgstr = image_data.split(';base64,')
         img_bytes = base64.b64decode(imgstr)
         np_arr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-        
-        if not os.path.exists(DATASETS_DIR): os.makedirs(DATASETS_DIR)
-        
+
+        if not os.path.exists(DATASETS_DIR):
+            os.makedirs(DATASETS_DIR)
+
         for (x, y, w, h) in faces:
             progress += 1
             cv2.imwrite(os.path.join(DATASETS_DIR, f"User.{user_id}.{progress}.jpg"), gray[y:y+h, x:x+w])
             request.session['capture_progress'] = progress
-            break # only 1 face per frame to avoid jumping progress
-            
+            break  # only 1 face per frame
+
+        attempts += 1
+        request.session['capture_attempts'] = attempts
+
         return JsonResponse({'status': 'capturing', 'progress': progress})
-        
+
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -1221,69 +1236,77 @@ def export_attendance_pdf(request):
 def edit_student(request, student_id):
     if not (request.user.is_superuser or request.user.userprofile.role == 'admin'):
         return redirect('dashboard')
-    
+
     from django.shortcuts import get_object_or_404
     student = get_object_or_404(Student, id=student_id)
-    
+
     if request.method == 'POST':
         action = request.POST.get('action')
-        
+
         if action == 'rescan':
-            # Reset recognized status
             student.user_profile.is_face_registered = False
             student.user_profile.save()
             request.session['enroll_user_id'] = student.user_profile.user.id
             messages.success(request, f"Ready to rescan face for {student.roll_number}")
             return redirect('enroll_face')
-            
+
         elif action == 'save':
-            # Update credentials & details
             u_name = request.POST.get('username')
             roll = request.POST.get('roll_number')
             dept = request.POST.get('department')
-            
-            # Simple conflict check
+
             if User.objects.filter(username=u_name).exclude(id=student.user_profile.user.id).exists():
                 messages.error(request, "Username already in use.")
             elif Student.objects.filter(roll_number=roll).exclude(id=student.id).exists():
-                messages.error(request, "Roll number already exists.")
+                messages.error(request, f"Roll number '{roll}' is already registered to another student.")
             else:
                 student.user_profile.user.username = u_name
                 if request.POST.get('password'):
                     student.user_profile.user.set_password(request.POST.get('password'))
                 student.user_profile.user.save()
-                
                 student.roll_number = roll
                 student.department = dept
                 student.save()
                 messages.success(request, "Student details updated successfully.")
                 return redirect('view_all_students')
 
-    return render(request, 'management/edit_student.html', {'student': student, 'show_sidebar': True})
+    # Collect captured dataset photos for this student
+    user_id = student.user_profile.user.id
+    photo_urls = []
+    if os.path.exists(DATASETS_DIR):
+        for fname in sorted(os.listdir(DATASETS_DIR)):
+            if fname.startswith(f"User.{user_id}.") and fname.endswith('.jpg'):
+                photo_urls.append(f"/datasets/{fname}")
+
+    return render(request, 'management/edit_student.html', {
+        'student': student,
+        'show_sidebar': True,
+        'photo_urls': photo_urls,
+    })
 
 @login_required
 def edit_teacher(request, teacher_id):
     if not (request.user.is_superuser or request.user.userprofile.role == 'admin'):
         return redirect('dashboard')
-        
+
     from django.shortcuts import get_object_or_404
     teacher = get_object_or_404(Teacher, id=teacher_id)
-    
+
     if request.method == 'POST':
         action = request.POST.get('action')
-        
+
         if action == 'rescan':
             teacher.user.userprofile.is_face_registered = False
             teacher.user.userprofile.save()
             request.session['enroll_user_id'] = teacher.user.id
             messages.success(request, f"Ready to rescan face for {teacher.name}")
             return redirect('enroll_face')
-            
+
         elif action == 'save':
             u_name = request.POST.get('username')
             name = request.POST.get('name')
             dept = request.POST.get('department')
-            
+
             if User.objects.filter(username=u_name).exclude(id=teacher.user.id).exists():
                 messages.error(request, "Username already in use.")
             else:
@@ -1291,14 +1314,25 @@ def edit_teacher(request, teacher_id):
                 if request.POST.get('password'):
                     teacher.user.set_password(request.POST.get('password'))
                 teacher.user.save()
-                
                 teacher.name = name
                 teacher.department = dept
                 teacher.save()
                 messages.success(request, "Faculty details updated successfully.")
                 return redirect('manage_faculty')
 
-    return render(request, 'management/edit_teacher.html', {'teacher': teacher, 'show_sidebar': True})
+    # Collect captured dataset photos for this teacher
+    user_id = teacher.user.id
+    photo_urls = []
+    if os.path.exists(DATASETS_DIR):
+        for fname in sorted(os.listdir(DATASETS_DIR)):
+            if fname.startswith(f"User.{user_id}.") and fname.endswith('.jpg'):
+                photo_urls.append(f"/datasets/{fname}")
+
+    return render(request, 'management/edit_teacher.html', {
+        'teacher': teacher,
+        'show_sidebar': True,
+        'photo_urls': photo_urls,
+    })
 
 @login_required
 def edit_attendance(request, record_id):
