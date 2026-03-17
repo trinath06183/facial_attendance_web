@@ -29,10 +29,34 @@ from django.core.files.base import ContentFile
 
 
 from django.conf import settings
+import mediapipe as mp
+import math
 
-# --- Global Classifiers ---
+# --- Global Classifiers & Models ---
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+
+# MediaPipe Face Mesh for liveness (blink) detection
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    max_num_faces=1,
+    refine_landmarks=True,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+def eye_aspect_ratio(eye_landmarks):
+    # Calculate distances between vertical eye landmarks
+    v1 = math.dist(eye_landmarks[1], eye_landmarks[5])
+    v2 = math.dist(eye_landmarks[2], eye_landmarks[4])
+    # Calculate distance between horizontal eye landmarks
+    h = math.dist(eye_landmarks[0], eye_landmarks[3])
+    
+    if h == 0: return 0.0
+    return (v1 + v2) / (2.0 * h)
+
+# Standard MediaPipe indices for eyes
+LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
+RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
 
 DATASETS_DIR = os.path.join(settings.BASE_DIR, 'datasets')
 TRAINER_DIR = os.path.join(settings.BASE_DIR, 'trainer')
@@ -67,17 +91,20 @@ def process_client_frame(request):
         np_arr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # MediaPipe needs RGB image
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mesh_results = face_mesh.process(rgb_frame)
         
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
         
         # Session state initialization
-        if 'eye_history' not in request.session:
-            request.session['eye_history'] = []  # Stores history of eye detection (e.g., [True, True, False, False, True] to identify a real blink)
+        if 'ear_history' not in request.session:
+            request.session['ear_history'] = []  # Stores history of EAR values
             request.session['blink_detected'] = False
             request.session['recognition_count'] = 0
             request.session['last_recognized_id'] = None
             
-        eye_history = request.session['eye_history']
+        ear_history = request.session['ear_history']
         blink_detected = request.session['blink_detected']
         recognition_count = request.session['recognition_count']
         last_recognized_id = request.session['last_recognized_id']
@@ -87,27 +114,38 @@ def process_client_frame(request):
         drawing_commands = []
         current_recognized_id = None
         
-        for (x, y, fw, fh) in faces:
-            # Blink Detection
-            roi_gray = gray[y: y + fh // 2, x: x + fw]
-            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.3, minNeighbors=4, minSize=(15, 15))
+        # Blink Detection via MediaPipe
+        current_ear = 0.0
+        if mesh_results.multi_face_landmarks:
+            landmarks = mesh_results.multi_face_landmarks[0].landmark
+            h, w, _ = frame.shape
             
-            # Record if we saw eyes this frame
-            saw_eyes = len(eyes) > 0
-            eye_history.append(saw_eyes)
+            # Extract 2D coordinates
+            left_eye_points = [(landmarks[idx].x * w, landmarks[idx].y * h) for idx in LEFT_EYE_INDICES]
+            right_eye_points = [(landmarks[idx].x * w, landmarks[idx].y * h) for idx in RIGHT_EYE_INDICES]
             
-            # Keep only the last 15 frames of history (approx 2-3 seconds at ~5fps over network)
-            if len(eye_history) > 15:
-                eye_history.pop(0)
+            left_ear = eye_aspect_ratio(left_eye_points)
+            right_ear = eye_aspect_ratio(right_eye_points)
+            current_ear = (left_ear + right_ear) / 2.0
+            
+            # Add to history
+            ear_history.append(current_ear)
+            if len(ear_history) > 20: 
+                ear_history.pop(0)
+                
+            # Blink pattern matching (EAR drops below 0.22, then rises above 0.28)
+            if not blink_detected and len(ear_history) > 5:
+                # Find minimum in recent history
+                min_ear = min(ear_history[-10:])
+                latest_ear = ear_history[-1]
+                
+                # If it dropped low (closed) and is now high again (open)
+                if min_ear < 0.22 and latest_ear > 0.28:
+                    blink_detected = True
+        else:
+            ear_history.clear() # Reset if no face found
 
-            # Analyze history for a "blink signature": True -> False -> True
-            if len(eye_history) >= 3 and not blink_detected:
-                # Scan recent history for any open->closed->open transition
-                recent = eye_history[-10:]
-                for i in range(1, len(recent) - 1):
-                    if recent[i - 1] and not recent[i] and recent[i + 1]:
-                        blink_detected = True
-                        break
+        for (x, y, fw, fh) in faces:
                 
             # Face Recognition
             try:
