@@ -1,230 +1,483 @@
-import os
-import cv2
-import time
+import os, cv2, time, math, base64, json, random
 import numpy as np
 from datetime import date, datetime
 from PIL import Image
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import StreamingHttpResponse, JsonResponse, HttpResponse
 from django.contrib import messages
 from django.contrib.auth import logout, login, authenticate
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from .models import UserProfile, Student, Attendance, Teacher, AppSetting
-from .forms import StudentRegistrationForm
-from .camera import VideoCamera
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Q
-import csv
-from .camera import get_detector, get_recognizer
-
-import base64
-import json
-import numpy as np
-import cv2
-from django.core.files.base import ContentFile
-
-
-
-
-
 from django.conf import settings
+from django.core.files.base import ContentFile
+import csv
+
+from .models import UserProfile, Student, Attendance, Teacher, AppSetting
+from .forms import StudentRegistrationForm
+from .camera import VideoCamera, get_detector, get_recognizer
+
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-import math
 
-# --- Global Classifiers & Models ---
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# MediaPipe FaceLandmarker for liveness (blink) detection
-base_options = python.BaseOptions(model_asset_path=os.path.join(settings.BASE_DIR, 'face_landmarker.task'))
-options = vision.FaceLandmarkerOptions(
-    base_options=base_options,
+# ─────────────────────────────────────────────
+#  CACHED RECOGNIZER  (reload only when trainer.yml changes)
+# ─────────────────────────────────────────────
+
+_recognizer_cache = None
+_trainer_mtime    = None
+
+def get_current_recognizer():
+    global _recognizer_cache, _trainer_mtime
+
+    if not os.path.exists(TRAINER_FILE):
+        return None  # No model trained yet
+
+    current_mtime = os.path.getmtime(TRAINER_FILE)
+
+    # Only reload if file changed on disk (e.g. after new enrollment)
+    if _recognizer_cache is None or current_mtime != _trainer_mtime:
+        rec = cv2.face.LBPHFaceRecognizer_create()
+        try:
+            rec.read(TRAINER_FILE)
+            _recognizer_cache = rec
+            _trainer_mtime    = current_mtime
+            print("[INFO] Recognizer reloaded from disk.")
+        except Exception as e:
+            print(f"[ERROR] Could not load trainer.yml: {e}")
+            return None
+
+    return _recognizer_cache
+
+
+# ─────────────────────────────────────────────
+#  GLOBAL MODELS  (loaded once at startup)
+# ─────────────────────────────────────────────
+
+face_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+)
+
+# Face Landmarker  (blink + pose + smile)
+_face_base   = python.BaseOptions(model_asset_path=os.path.join(settings.BASE_DIR, 'face_landmarker.task'))
+_face_opts   = vision.FaceLandmarkerOptions(
+    base_options=_face_base,
     num_faces=1,
     min_face_detection_confidence=0.5,
     min_face_presence_confidence=0.5,
     min_tracking_confidence=0.5
 )
-face_landmarker = vision.FaceLandmarker.create_from_options(options)
+face_landmarker = vision.FaceLandmarker.create_from_options(_face_opts)
 
-def eye_aspect_ratio(eye_landmarks):
-    # Calculate distances between vertical eye landmarks
-    v1 = math.dist(eye_landmarks[1], eye_landmarks[5])
-    v2 = math.dist(eye_landmarks[2], eye_landmarks[4])
-    # Calculate distance between horizontal eye landmarks
-    h = math.dist(eye_landmarks[0], eye_landmarks[3])
-    
-    if h == 0: return 0.0
-    return (v1 + v2) / (2.0 * h)
+# Hand Landmarker  (show-hand challenge)
+_hand_base   = python.BaseOptions(model_asset_path=os.path.join(settings.BASE_DIR, 'hand_landmarker.task'))
+_hand_opts   = vision.HandLandmarkerOptions(
+    base_options=_hand_base,
+    num_hands=1,
+    min_hand_detection_confidence=0.5,
+    min_hand_presence_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+hand_landmarker = vision.HandLandmarker.create_from_options(_hand_opts)
 
-# Standard MediaPipe indices for eyes
-LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
+
+# ─────────────────────────────────────────────
+#  LANDMARK INDEX CONSTANTS
+# ─────────────────────────────────────────────
+
+# Eyes  (EAR blink)
+LEFT_EYE_INDICES  = [33,  160, 158, 133, 153, 144]
 RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
 
+# Pose  (head turn)
+NOSE_TIP     = 1
+LEFT_CHEEK   = 234    # outer left
+RIGHT_CHEEK  = 454    # outer right
+
+# Smile  (mouth corners vs mouth height)
+MOUTH_LEFT   = 61
+MOUTH_RIGHT  = 291
+MOUTH_TOP    = 13
+MOUTH_BOTTOM = 14
+
+# Hand  (open-palm: all 5 fingertips above their MCP joint)
+FINGERTIP_IDS = [4, 8, 12, 16, 20]   # thumb, index, middle, ring, pinky
+FINGER_MCP_IDS = [2, 5, 9, 13, 17]  # corresponding base joints
+
+# ─────────────────────────────────────────────
+#  CHALLENGE POOL  — add / remove freely
+# ─────────────────────────────────────────────
+
+CHALLENGES = [
+    {
+        'key':         'blink',
+        'instruction': 'Please BLINK your eyes',
+        'emoji':       '👁️',
+    },
+    {
+        'key':         'turn_left',
+        'instruction': 'Turn your head to the LEFT',
+        'emoji':       '⬅️',
+    },
+    {
+        'key':         'turn_right',
+        'instruction': 'Turn your head to the RIGHT',
+        'emoji':       '➡️',
+    },
+    {
+        'key':         'smile',
+        'instruction': 'Give a big SMILE 😄',
+        'emoji':       '😄',
+    },
+    {
+        'key':         'show_hand',
+        'instruction': 'Show an OPEN HAND to the camera ✋',
+        'emoji':       '✋',
+    },
+]
+
+
+# ─────────────────────────────────────────────
+#  HELPER FUNCTIONS
+# ─────────────────────────────────────────────
+
+def eye_aspect_ratio(eye_pts):
+    v1 = math.dist(eye_pts[1], eye_pts[5])
+    v2 = math.dist(eye_pts[2], eye_pts[4])
+    h  = math.dist(eye_pts[0], eye_pts[3])
+    return (v1 + v2) / (2.0 * h) if h != 0 else 0.0
+
+
+def check_blink(landmarks, frame_shape, session):
+    """Returns True once a valid blink is detected using a state machine."""
+    h, w, _ = frame_shape
+    lep = [(landmarks[i].x * w, landmarks[i].y * h) for i in LEFT_EYE_INDICES]
+    rep = [(landmarks[i].x * w, landmarks[i].y * h) for i in RIGHT_EYE_INDICES]
+    ear = (eye_aspect_ratio(lep) + eye_aspect_ratio(rep)) / 2.0
+
+    state  = session.get('ch_blink_state', 'OPEN')
+    frames = session.get('ch_closed_frames', 0)
+
+    EAR_CLOSE = 0.22
+    EAR_OPEN  = 0.26
+    MIN_CLOSE = 1
+    MAX_CLOSE = 15
+
+    passed = False
+    if state == 'OPEN':
+        if ear < EAR_CLOSE:
+            state, frames = 'CLOSING', 1
+    elif state == 'CLOSING':
+        if ear < EAR_CLOSE:
+            frames += 1
+            if frames > MAX_CLOSE:          # held shut too long → reset
+                state, frames = 'OPEN', 0
+        else:                               # eye reopened
+            if frames >= MIN_CLOSE:
+                passed = True
+            state, frames = 'OPEN', 0
+
+    session['ch_blink_state']   = state
+    session['ch_closed_frames'] = frames
+    return passed
+
+
+def check_turn_left(landmarks, frame_shape):
+    """
+    Head turned left (camera-left) when the nose tip is clearly
+    to the LEFT of the face midpoint between both cheeks.
+    """
+    h, w, _ = frame_shape
+    nose_x  = landmarks[NOSE_TIP].x * w
+    left_x  = landmarks[LEFT_CHEEK].x * w
+    right_x = landmarks[RIGHT_CHEEK].x * w
+    mid_x   = (left_x + right_x) / 2.0
+    # Nose must be shifted left of midpoint by at least 12 % of face width
+    face_w  = abs(right_x - left_x)
+    return (mid_x - nose_x) > (face_w * 0.12)
+
+
+def check_turn_right(landmarks, frame_shape):
+    h, w, _ = frame_shape
+    nose_x  = landmarks[NOSE_TIP].x * w
+    left_x  = landmarks[LEFT_CHEEK].x * w
+    right_x = landmarks[RIGHT_CHEEK].x * w
+    mid_x   = (left_x + right_x) / 2.0
+    face_w  = abs(right_x - left_x)
+    return (nose_x - mid_x) > (face_w * 0.12)
+
+
+def check_smile(landmarks, frame_shape):
+    """
+    Smile ratio: mouth-width / mouth-height.
+    A genuine smile widens the mouth significantly.
+    """
+    h, w, _ = frame_shape
+    ml = (landmarks[MOUTH_LEFT].x  * w, landmarks[MOUTH_LEFT].y  * h)
+    mr = (landmarks[MOUTH_RIGHT].x * w, landmarks[MOUTH_RIGHT].y * h)
+    mt = (landmarks[MOUTH_TOP].x   * w, landmarks[MOUTH_TOP].y   * h)
+    mb = (landmarks[MOUTH_BOTTOM].x* w, landmarks[MOUTH_BOTTOM].y* h)
+
+    mouth_w = math.dist(ml, mr)
+    mouth_h = math.dist(mt, mb) + 1e-6     # avoid zero-div
+    ratio   = mouth_w / mouth_h
+    return ratio > 3.8                      # tune between 3.5 – 4.5
+
+
+def check_open_hand(hand_results, frame_shape):
+    """
+    Open palm: all 5 fingertips are ABOVE (smaller y) their base MCP joint.
+    Also checks thumb is extended horizontally.
+    """
+    if not hand_results.hand_landmarks:
+        return False
+
+    lm   = hand_results.hand_landmarks[0]
+    h, w, _ = frame_shape
+
+    extended = 0
+    for tip_id, mcp_id in zip(FINGERTIP_IDS[1:], FINGER_MCP_IDS[1:]):  # fingers 1-4
+        if lm[tip_id].y < lm[mcp_id].y:   # tip above base in image coords
+            extended += 1
+
+    # Thumb: tip x farther from wrist than IP joint
+    thumb_ok = abs(lm[4].x - lm[0].x) > abs(lm[3].x - lm[0].x)
+
+    return extended >= 3 and thumb_ok      # at least 3 fingers + thumb extended
+
+
+# ─────────────────────────────────────────────
+#  SESSION DEFAULTS
+# ─────────────────────────────────────────────
+
+def init_challenge_session(session):
+    defaults = {
+        'liveness_passed':    False,
+        'current_challenge':  None,
+        'ch_blink_state':     'OPEN',
+        'ch_closed_frames':   0,
+        'recognition_count':  0,
+        'last_recognized_id': None,
+    }
+    for k, v in defaults.items():
+        if k not in session:
+            session[k] = v
+
+
+# ─────────────────────────────────────────────
+#  API: assign a fresh random challenge
+# ─────────────────────────────────────────────
+
+@csrf_exempt
+def assign_challenge(request):
+    """Call this once when the camera opens to get the challenge for this session."""
+    challenge = random.choice(CHALLENGES)
+
+    # Reset any previous challenge state
+    request.session['liveness_passed']   = False
+    request.session['current_challenge'] = challenge['key']
+    request.session['ch_blink_state']    = 'OPEN'
+    request.session['ch_closed_frames']  = 0
+    request.session['recognition_count'] = 0
+    request.session['last_recognized_id']= None
+
+    return JsonResponse({
+        'challenge':    challenge['key'],
+        'instruction':  challenge['instruction'],
+        'emoji':        challenge['emoji'],
+    })
+
+
+# ─────────────────────────────────────────────
+#  MAIN FRAME PROCESSOR
+# ─────────────────────────────────────────────
+
 DATASETS_DIR = os.path.join(settings.BASE_DIR, 'datasets')
-TRAINER_DIR = os.path.join(settings.BASE_DIR, 'trainer')
+TRAINER_DIR  = os.path.join(settings.BASE_DIR, 'trainer')
 TRAINER_FILE = os.path.join(TRAINER_DIR, 'trainer.yml')
 
-def get_current_recognizer():
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    if os.path.exists(TRAINER_FILE):
-        try:
-            recognizer.read(TRAINER_FILE)
-        except:
-            pass
-    return recognizer
 
-CLOSED_FRAMES_MIN = 1
-
+# Removed redundant get_current_recognizer logic
 
 
 @csrf_exempt
 def process_client_frame(request):
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST allowed'}, status=405)
-        
+
     try:
-        data = json.loads(request.body)
+        data       = json.loads(request.body)
         image_data = data.get('image')
         if not image_data:
             return JsonResponse({'error': 'No image provided'}, status=400)
-            
-        format, imgstr = image_data.split(';base64,') 
-        img_bytes = base64.b64decode(imgstr)
-        np_arr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # MediaPipe needs RGB image and its own Image format
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-        mesh_results = face_landmarker.detect(mp_image)
-        
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
-        
-        # Session state initialization
-        if 'ear_history' not in request.session:
-            request.session['ear_history'] = []  # Stores history of EAR values
-            request.session['blink_detected'] = False
-            request.session['recognition_count'] = 0
-            request.session['last_recognized_id'] = None
-            
-        ear_history = request.session['ear_history']
-        blink_detected = request.session['blink_detected']
-        recognition_count = request.session['recognition_count']
-        last_recognized_id = request.session['last_recognized_id']
-        
-        recognizer = get_current_recognizer()
-        
-        drawing_commands = []
-        current_recognized_id = None
-        
-        # Blink Detection via MediaPipe Tasks API
-        current_ear = 0.0
-        if mesh_results.face_landmarks:
-            landmarks = mesh_results.face_landmarks[0] # First face
-            h, w, _ = frame.shape
-            
-            # Extract 2D coordinates
-            left_eye_points = [(landmarks[idx].x * w, landmarks[idx].y * h) for idx in LEFT_EYE_INDICES]
-            right_eye_points = [(landmarks[idx].x * w, landmarks[idx].y * h) for idx in RIGHT_EYE_INDICES]
-            
-            left_ear = eye_aspect_ratio(left_eye_points)
-            right_ear = eye_aspect_ratio(right_eye_points)
-            current_ear = (left_ear + right_ear) / 2.0
-            
-            # Add to history
-            ear_history.append(current_ear)
-            if len(ear_history) > 20: 
-                ear_history.pop(0)
-                
-            # Blink pattern matching (EAR drops below 0.22, then rises above 0.28)
-            if not blink_detected and len(ear_history) > 5:
-                # Find minimum in recent history
-                min_ear = min(ear_history[-10:])
-                latest_ear = ear_history[-1]
-                
-                # If it dropped low (closed) and is now high again (open)
-                if min_ear < 0.22 and latest_ear > 0.28:
-                    blink_detected = True
+
+        # ── Decode frame ──────────────────────────────────────────────
+        _, imgstr  = image_data.split(';base64,')
+        frame      = cv2.imdecode(np.frombuffer(base64.b64decode(imgstr), np.uint8),
+                                  cv2.IMREAD_COLOR)
+        gray       = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rgb_frame  = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image   = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+
+        # ── Session bootstrap ─────────────────────────────────────────
+        init_challenge_session(request.session)
+        challenge       = request.session.get('current_challenge')
+        liveness_passed = request.session.get('liveness_passed', False)
+
+        # ── MediaPipe inference (Optimized: only run if needed) ───────
+        face_results = None
+        hand_results = None
+
+        if not liveness_passed:
+            if challenge in ['blink', 'turn_left', 'turn_right', 'smile']:
+                face_results = face_landmarker.detect(mp_image)
+            elif challenge == 'show_hand':
+                hand_results = hand_landmarker.detect(mp_image)
+
+        # ── Haar face boxes (for LBPH recognition) ────────────────────
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1,  # Loosened from 1.3
+                                              minNeighbors=4,         # Loosened from 5
+                                              minSize=(30, 30))       # Loosened from 50x50
+
+        if len(faces) > 0:
+            print(f"[DEBUG] Detected {len(faces)} faces via Haar.")
         else:
-            ear_history.clear() # Reset if no face found
+            # Check if cascade is loaded
+            if face_cascade.empty():
+                print("[ERROR] Face cascade is EMPTY. Check XML path.")
+            else:
+                pass # No face in this frame
+
+        challenge       = request.session.get('current_challenge')
+        liveness_passed = request.session.get('liveness_passed', False)
+        rec_count       = request.session['recognition_count']
+        last_id         = request.session['last_recognized_id']
+
+        # ── Challenge evaluation ──────────────────────────────────────
+        challenge_result = {
+            'passed':      liveness_passed,
+            'challenge':   challenge,
+        }
+
+        if not liveness_passed and challenge:
+            passed_this_frame = False
+
+            if challenge in ['blink', 'turn_left', 'turn_right', 'smile'] and face_results and face_results.face_landmarks:
+                lm = face_results.face_landmarks[0]
+
+                if challenge == 'blink':
+                    passed_this_frame = check_blink(lm, frame.shape, request.session)
+
+                elif challenge == 'turn_left':
+                    passed_this_frame = check_turn_left(lm, frame.shape)
+
+                elif challenge == 'turn_right':
+                    passed_this_frame = check_turn_right(lm, frame.shape)
+
+                elif challenge == 'smile':
+                    passed_this_frame = check_smile(lm, frame.shape)
+
+            # Hand challenge doesn't need face landmarks
+            elif challenge == 'show_hand' and hand_results:
+                passed_this_frame = check_open_hand(hand_results, frame.shape)
+
+            if passed_this_frame:
+                print(f"[DEBUG] Challenge {challenge} PASSED.")
+                liveness_passed = True
+                request.session['liveness_passed'] = True
+                challenge_result['passed'] = True
+
+        # ── Face Recognition (LBPH) ───────────────────────────────────
+        recognizer       = get_current_recognizer()
+        drawing_commands = []
+        current_id       = None
 
         for (x, y, fw, fh) in faces:
-                
-            # Face Recognition
-            try:
-                user_id, confidence = recognizer.predict(gray[y:y+fh, x:x+fw])
-                if confidence < 48:
-                    from .models import UserProfile
-                    try:
-                        profile = UserProfile.objects.get(user_id=user_id)
-                        role = profile.role.capitalize()
-                        name = profile.user.username
-                        label = f"{name} ({role})"
-                        
-                        if profile.role == 'teacher':
-                            color = [255, 0, 0] # BGR in OpenCV, but we use RGB for frontend overlay
-                            rgb_color = 'rgb(0, 0, 255)' 
-                        elif profile.role == 'admin':
-                            rgb_color = 'rgb(255, 165, 0)'
-                        else:
-                            rgb_color = 'rgb(0, 255, 0)'
-                            
-                        current_recognized_id = user_id
-                    except:
-                        label = "Unknown Profile"
-                        rgb_color = 'rgb(255, 0, 0)'
-                else:
-                    label = "Unknown"
-                    rgb_color = 'rgb(255, 0, 0)'
-            except Exception:
-                label = "Scanning..."
-                rgb_color = 'rgb(255, 165, 0)'
-                
+            label     = 'Scanning...'
+            rgb_color = 'rgb(255,165,0)'
+
+            # ── Preprocessing: improves LBPH accuracy significantly ───
+            face_roi = gray[y:y+fh, x:x+fw]
+            face_roi = cv2.resize(face_roi, (100, 100))             # normalize size
+            face_roi = cv2.equalizeHist(face_roi)                   # fix lighting
+            face_roi = cv2.GaussianBlur(face_roi, (3, 3), 0)        # reduce noise
+
+            if recognizer is None:
+                label, rgb_color = 'No Model', 'rgb(255,0,0)'
+            else:
+                try:
+                    uid, confidence = recognizer.predict(face_roi)
+                    print(f"[DEBUG] predict → uid={uid}, confidence={confidence:.1f}")
+
+                    if confidence < 60:  # Loosened from 48 to 60
+                        try:
+                            profile    = UserProfile.objects.get(user_id=uid)
+                            name       = profile.user.username
+                            role       = profile.role.capitalize()
+                            label      = f"{name} ({role}) [{confidence:.0f}]"
+                            rgb_color  = ('rgb(0,0,255)'   if profile.role == 'teacher' else
+                                          'rgb(255,165,0)' if profile.role == 'admin'   else
+                                          'rgb(0,255,0)')
+                            current_id = uid
+                        except UserProfile.DoesNotExist:
+                            label, rgb_color = 'Profile Missing', 'rgb(255,0,0)'
+                    else:
+                        label     = f'Unknown [{confidence:.0f}]'
+                        rgb_color = 'rgb(255,0,0)'
+
+                except cv2.error as e:
+                    print(f"[ERROR] recognizer.predict failed: {e}")
+                    label, rgb_color = 'Error', 'rgb(255,0,0)'
+
             drawing_commands.append({
                 'type': 'rect',
                 'x': int(x), 'y': int(y), 'w': int(fw), 'h': int(fh),
-                'color': rgb_color,
-                'label': label
+                'color': rgb_color, 'label': label,
             })
-            
-        # Update recognition counter
-        if current_recognized_id and blink_detected:
-            if current_recognized_id == last_recognized_id:
-                recognition_count += 1
+
+        # ── Recognition counter (only increments after liveness pass) ─
+        if current_id and liveness_passed:
+            if current_id == last_id:
+                rec_count += 1
             else:
-                last_recognized_id = current_recognized_id
-                recognition_count = 1
+                last_id, rec_count = current_id, 1
         else:
-            recognition_count = 0
-            last_recognized_id = None
-            
-        # Save state to session
-        request.session['ear_history'] = ear_history
-        request.session['blink_detected'] = blink_detected
-        request.session['recognition_count'] = recognition_count
-        request.session['last_recognized_id'] = last_recognized_id
-        
+            # Revert to 0 if liveness fails or person lost
+            rec_count, last_id = 0, None
+
+        # ── Persist session ───────────────────────────────────────────
+        request.session['recognition_count']  = rec_count
+        request.session['last_recognized_id'] = last_id
+
         return JsonResponse({
-            'status': 'success',
-            'draw': drawing_commands,
-            'liveness': blink_detected,
-            'recognition_count': recognition_count
+            'status':            'success',
+            'draw':              drawing_commands,
+            'liveness':          liveness_passed,
+            'challenge':         challenge_result,
+            'recognition_count': rec_count,
         })
-        
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return JsonResponse({'error': str(e)}, status=500)
+
+
+# ─────────────────────────────────────────────
+#  RESET  (call when camera closes or user retries)
+# ─────────────────────────────────────────────
+
+# Duplicate reset_recognition_session removed from here
+
 
 @csrf_exempt
 def stop_camera(request):
-    if 'blink_detected' in request.session:
-        # Reset session vars when camera is stopped by user
-        request.session['blink_detected'] = False
-        request.session['recognition_count'] = 0
-        request.session['last_recognized_id'] = None
-    return JsonResponse({"status": "Session cleared"})
-
+    reset_recognition_session(request)
+    return JsonResponse({'status': 'Session cleared'})
 # --- Authentication Views ---
 def home(request):
     return render(request, 'homepage.html')
@@ -304,24 +557,22 @@ def verify_teacher_face(request):
     if not pending_id:
         return JsonResponse({'status': 'error', 'message': 'No pending login'})
 
-    blink_detected = request.session.get('blink_detected', False)
+    liveness_passed = request.session.get('liveness_passed', False)
     last_recognized_id = request.session.get('last_recognized_id')
     recognition_count = request.session.get('recognition_count', 0)
     
-    if not blink_detected:
-        return JsonResponse({'status': 'pending', 'message': 'Please blink to verify liveness'})
+    if not liveness_passed:
+        challenge = request.session.get('current_challenge', 'action')
+        return JsonResponse({'status': 'pending', 'message': f'Please complete the {challenge} challenge'})
         
-    if not (last_recognized_id and recognition_count >= 5):
+    if not (last_recognized_id and recognition_count >= 3):
         return JsonResponse({'status': 'pending'})
         
     if last_recognized_id == pending_id:
         try:
             user = User.objects.get(id=pending_id)
             login(request, user)
-            del request.session['pending_2fa_user_id']
-            request.session['blink_detected'] = False
-            request.session['recognition_count'] = 0
-            request.session['last_recognized_id'] = None
+            reset_recognition_session(request)
             return JsonResponse({'status': 'success', 'url': '/dashboard/'})
         except User.DoesNotExist:
             return JsonResponse({'status': 'error', 'message': 'User not found'})
@@ -661,7 +912,15 @@ def register_student(request):
                 return render(request, 'registration/register_student.html', {'form': form, 'show_sidebar': True})
 
             # Create the User
-            new_user = User.objects.create_user(username=u_name, password=p_word, email=email)
+            full_name = form.cleaned_data.get('name', '')
+            print(f"[DEBUG] Creating student user: {u_name}, Name: {full_name}")
+            
+            new_user = User.objects.create_user(
+                username=u_name, 
+                password=p_word, 
+                email=email,
+                first_name=full_name
+            )
 
             # Create UserProfile
             profile = UserProfile.objects.create(
@@ -679,8 +938,13 @@ def register_student(request):
 
             # Store ID in session for face enrollment
             request.session['enroll_user_id'] = new_user.id
-            messages.success(request, f"Details saved for {u_name}! Now let's capture the face.")
+            request.session.modified = True
+            
+            print(f"[DEBUG] Student {u_name} registered successfully. Redirecting to enroll_face.")
+            messages.success(request, f"Details saved for {full_name}! Now let's capture the face.")
             return redirect('enroll_face')
+        else:
+            print(f"[DEBUG] Form invalid: {form.errors.as_json()}")
     else:
         form = StudentRegistrationForm()
 
@@ -1018,44 +1282,78 @@ def capture_face_samples(request, user_id):
 
 def run_trainer_logic():
     path = DATASETS_DIR
-    if not os.path.exists(path) or not os.listdir(path): return False
-    
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    imagePaths = [os.path.join(path, f) for f in os.listdir(path)]     
+    if not os.path.exists(path) or not os.listdir(path):
+        return False
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create(
+        radius=2, neighbors=8, grid_x=8, grid_y=8  # more detailed grid
+    )
+    detector     = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    imagePaths   = [os.path.join(path, f) for f in os.listdir(path) if f.endswith('.jpg')]
     faceSamples, ids = [], []
-    
+
     for imagePath in imagePaths:
         try:
-            PIL_img = Image.open(imagePath).convert('L')
+            PIL_img   = Image.open(imagePath).convert('L')
             img_numpy = np.array(PIL_img, 'uint8')
-            uid = int(os.path.split(imagePath)[-1].split(".")[1])
-            faces = detector.detectMultiScale(img_numpy)
+            uid       = int(os.path.split(imagePath)[-1].split(".")[1])
+            faces     = detector.detectMultiScale(img_numpy, 1.3, 5)
+
             for (x, y, w, h) in faces:
-                faceSamples.append(img_numpy[y:y+h, x:x+w])
+                roi = img_numpy[y:y+h, x:x+w]
+                roi = cv2.resize(roi, (100, 100))      # ← must match predict size
+                roi = cv2.equalizeHist(roi)            # ← same preprocessing
+                roi = cv2.GaussianBlur(roi, (3, 3), 0)
+                faceSamples.append(roi)
                 ids.append(uid)
-        except: continue
-        
+        except Exception as e:
+            print(f"[TRAINER) Skipping {imagePath}: {e}")
+            continue
+
     if ids:
-        if not os.path.exists(TRAINER_DIR): os.makedirs(TRAINER_DIR)
+        if not os.path.exists(TRAINER_DIR):
+            os.makedirs(TRAINER_DIR)
         recognizer.train(faceSamples, np.array(ids))
         recognizer.write(TRAINER_FILE)
+
+        # Bust the cache so next frame reloads fresh model
+        global _recognizer_cache, _trainer_mtime
+        _recognizer_cache = None
+        _trainer_mtime    = None
+
+        print(f"[TRAINER] Trained on {len(ids)} samples for {len(set(ids))} users.")
         return True
+
+    print("[TRAINER] No face samples found.")
     return False
 
 @csrf_exempt
 def reset_recognition_session(request):
-    request.session['last_recognized_id'] = None
-    request.session['recognition_count'] = 0
-    request.session['blink_detected'] = False
-    request.session['eye_closed_frames'] = 0
+    keys = [
+        'liveness_passed', 'current_challenge',
+        'ch_blink_state', 'ch_closed_frames',
+        'recognition_count', 'last_recognized_id',
+        'blink_detected', 'ear_history',          # legacy keys
+        'blink_state', 'closed_frame_count'       # legacy keys
+    ]
+    for k in keys:
+        request.session.pop(k, None)
     return JsonResponse({'status': 'ok'})
 
 def check_face_status(request):
+    # ── NEW: require liveness to be passed first ──────────────────
+    liveness_passed   = request.session.get('liveness_passed', False)
     last_recognized_id = request.session.get('last_recognized_id')
     recognition_count = request.session.get('recognition_count', 0)
-    
-    if not (last_recognized_id and recognition_count >= 5):
+
+    if not liveness_passed:
+        challenge = request.session.get('current_challenge', 'the challenge')
+        return JsonResponse({
+            'status': 'pending',
+            'message': f'Please complete the liveness check first ({challenge})'
+        })
+
+    if not (last_recognized_id and recognition_count >= 3):
         return JsonResponse({'status': 'pending'})
         
     try:

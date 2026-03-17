@@ -45,5 +45,6 @@ urlpatterns = [
     path('save-face-data/', views.save_face_data, name='save_face_data'),
     path('reset-session/', views.reset_recognition_session, name='reset_session'),
     path('check-face-status/', views.check_face_status, name='check_face_status'),
+    path('api/assign-challenge/', views.assign_challenge, name='assign_challenge'),
 ]
 # Force Django reload

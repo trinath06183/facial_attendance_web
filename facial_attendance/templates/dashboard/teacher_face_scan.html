@@ -19,6 +19,17 @@
     <div class="flex flex-col md:flex-row flex-1 p-4 md:p-8 gap-4 md:gap-8 items-center justify-center">
         <div class="flex flex-col items-center w-full max-w-[640px]">
             <div class="relative mb-4 md:mb-8 w-full mx-auto">
+                <!-- Challenge Banner -->
+                <div id="challenge-box" class="absolute top-4 left-1/2 -translate-x-1/2 z-50 challenge-banner w-[90%] max-w-[400px]" style="display:none;">
+                    <div class="flex items-center justify-center gap-3">
+                        <span id="challenge-emoji" class="text-3xl"></span>
+                        <div class="text-left">
+                            <p id="challenge-text" class="font-bold text-white text-sm leading-tight"></p>
+                            <p id="liveness-status" class="text-yellow-400 text-[10px] font-bold uppercase tracking-wider mt-1">⏳ Waiting for action...</p>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="absolute inset-0 border-2 border-blue-500/20 rounded-3xl pointer-events-none z-10"></div>
                 <!-- HTML5 Video to capture the stream from JS -->
                 <video id="videoElement" autoplay playsinline
@@ -75,6 +86,24 @@
     .animate-scan {
         animation: scan 3s linear infinite;
     }
+
+    .challenge-banner {
+        background: rgba(15, 23, 42, 0.9);
+        backdrop-filter: blur(8px);
+        color: white;
+        border-radius: 20px;
+        padding: 16px 24px;
+        text-align: center;
+        border: 2px solid rgba(59, 130, 246, 0.5);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+    }
+
+    .challenge-banner.passed {
+        border-color: #22c55e;
+        background: rgba(20, 83, 45, 0.9);
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+    }
 </style>
 {% endblock %}
 
@@ -87,11 +116,33 @@
     const captureCtx = captureCanvas.getContext('2d');
 
     let isProcessing = false;
+    let currentChallenge = null;
+
+    // 1. Fetch random challenge on load
+    function initChallenge() {
+        fetch("{% url 'assign_challenge' %}")
+            .then(res => res.json())
+            .then(data => {
+                currentChallenge = data.challenge;
+                const box = document.getElementById('challenge-box');
+                const status = document.getElementById('liveness-status');
+                
+                box.style.display = 'block';
+                box.classList.remove('passed');
+                document.getElementById('challenge-emoji').textContent = data.emoji;
+                document.getElementById('challenge-text').textContent = data.instruction;
+                
+                status.textContent = '⏳ Waiting for action...';
+                status.classList.remove('text-green-400');
+                status.classList.add('text-yellow-400');
+            });
+    }
 
     // Start Webcam
     navigator.mediaDevices.getUserMedia({ video: true })
         .then(stream => {
             video.srcObject = stream;
+            initChallenge();
         })
         .catch(err => {
             console.error("Error accessing webcam: ", err);
@@ -139,26 +190,13 @@
             .then(data => {
                 overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
                 if (data.status === 'success') {
-                    // Draw Liveness HUD
-                    overlayCtx.save();
-                    overlayCtx.scale(-1, 1); // unflip text
-
-                    const hudY = overlayCanvas.height - 40;
-
+                    // Update Challenge UI
+                    const challengeBox = document.getElementById('challenge-box');
                     if (data.liveness) {
-                        overlayCtx.fillStyle = 'rgba(0, 80, 0, 0.7)';
-                        overlayCtx.fillRect(-overlayCanvas.width, hudY, overlayCanvas.width, 40);
-                        overlayCtx.fillStyle = 'rgb(0, 255, 100)';
-                        overlayCtx.font = 'bold 16px Arial';
-                        overlayCtx.fillText("  LIVENESS VERIFIED  -  Blink Detected!", -overlayCanvas.width + 10, hudY + 25);
-                    } else {
-                        overlayCtx.fillStyle = 'rgba(0, 50, 100, 0.7)';
-                        overlayCtx.fillRect(-overlayCanvas.width, hudY, overlayCanvas.width, 40);
-                        overlayCtx.fillStyle = 'rgb(0, 200, 255)';
-                        overlayCtx.font = 'bold 14px Arial';
-                        overlayCtx.fillText("  Please blink once to verify liveness...", -overlayCanvas.width + 10, hudY + 25);
+                        document.getElementById('liveness-status').textContent = '✅ Verified!';
+                        document.getElementById('liveness-status').classList.replace('text-yellow-400', 'text-green-400');
+                        challengeBox.classList.add('passed');
                     }
-                    overlayCtx.restore();
 
                     // Draw rectangles & labels
                     data.draw.forEach(cmd => {
@@ -209,14 +247,14 @@
 
                     setTimeout(() => {
                         window.location.href = data.url;
-                    }, 1500);
+                    }, 800);
                 } else if (data.status === 'error') {
                     statusText.innerText = data.message;
                     statusBox.classList.add('bg-red-50', 'border-red-100');
                     statusText.classList.add('text-red-700');
                 } else {
                     // Pending, keep polling
-                    setTimeout(pollVerification, 1000);
+                    setTimeout(pollVerification, 500);
                 }
             })
             .catch(err => {

@@ -34,23 +34,24 @@
     {% if user.is_authenticated and show_sidebar %}
 
     <!-- Mobile Header -->
-    <div class="md:hidden bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-50">
-        <a href="{% url 'dashboard' %}" class="text-xl font-bold text-blue-600 flex items-center gap-2">
-            <i class="fas fa-camera-retro"></i> SmartAttend
+    <div class="md:hidden bg-white border-b border-gray-200 px-4 py-3 flex justify-between items-center sticky top-0 z-50 w-full overflow-hidden">
+        <a href="{% url 'dashboard' %}" class="text-lg font-bold text-blue-600 flex items-center gap-2 truncate min-w-0">
+            <i class="fas fa-camera-retro shrink-0"></i> 
+            <span class="truncate">SmartAttend</span>
         </a>
-        <div class="flex items-center gap-4">
-            <a href="{% url 'logout' %}" class="text-gray-500 hover:text-red-600 transition-all" title="Logout">
-                <i class="fas fa-sign-out-alt w-5 h-5 flex items-center justify-center text-xl"></i>
+        <div class="flex items-center gap-2 shrink-0 ml-4">
+            <a href="{% url 'logout' %}" class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all" title="Logout">
+                <i class="fas fa-sign-out-alt text-lg"></i>
             </a>
-            <button id="mobile-menu-btn" class="text-gray-600 hover:text-blue-600 focus:outline-none ml-2">
-                <i class="fas fa-bars text-2xl"></i>
+            <button id="mobile-menu-btn" class="w-10 h-10 flex items-center justify-center text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl focus:outline-none">
+                <i class="fas fa-bars text-xl"></i>
             </button>
         </div>
     </div>
 
     <!-- Sidebar -->
     <aside id="main-sidebar"
-        class="w-64 bg-white border-r border-gray-200 flex-col sticky top-0 h-screen shrink-0 hidden md:flex fixed md:static z-40 top-[73px] md:top-0 bottom-0 overflow-y-auto">
+        class="w-64 bg-white border-r border-gray-200 flex-col sticky top-0 h-screen shrink-0 hidden md:flex fixed md:static z-40 top-[64px] md:top-0 bottom-0 overflow-y-auto">
         <div class="p-6 hidden md:block">
             <a href="{% url 'dashboard' %}" class="text-xl font-bold text-blue-600 flex items-center gap-2">
                 <i class="fas fa-camera-retro"></i> SmartAttend
@@ -65,13 +66,6 @@
                 class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
                 <i class="fas fa-user-plus w-5"></i> Register Student
             </a>
-
-            <div class="group relative">
-                <a href="{% url 'face_scan' %}"
-                    class="sidebar-link flex items-center justify-between px-3 py-2 rounded-lg text-blue-600 bg-blue-50/50 transition-all text-sm font-semibold">
-                    <span class="flex items-center gap-3"><i class="fas fa-video w-5"></i> Start Recognition</span>
-                </a>
-            </div>
 
             <a href="{% url 'view_all_students' %}"
                 class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg text-gray-600 transition-all text-sm">
@@ -103,11 +97,6 @@
 
             {% elif user.userprofile.role == 'teacher' %}
             <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-3 mb-2 mt-4">Teacher Panel</p>
-
-            <a href="{% url 'face_scan' %}"
-                class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-blue-600 bg-blue-50 font-bold text-sm">
-                <i class="fas fa-video w-5"></i> Start Recognition
-            </a>
 
             <a href="{% url 'view_all_students' %}"
                 class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-600 transition-all text-sm">
@@ -187,7 +176,22 @@
     </aside>
     {% endif %}
 
-    <main class="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden">
+    <main class="flex-1 flex flex-col min-w-0 w-full overflow-x-hidden p-4 md:p-8">
+        {% if messages %}
+        <div class="max-w-4xl mx-auto w-full mb-6 space-y-2">
+            {% for message in messages %}
+            <div class="p-4 rounded-2xl flex items-center justify-between {% if message.tags == 'error' %}bg-red-50 text-red-700 border border-red-100{% else %}bg-green-50 text-green-700 border border-green-100{% endif %} shadow-sm animate-in fade-in slide-in-from-top-4">
+                <div class="flex items-center gap-3">
+                    <i class="fas {% if message.tags == 'error' %}fa-exclamation-circle{% else %}fa-check-circle{% endif %}"></i>
+                    <span class="text-sm font-semibold">{{ message }}</span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </main>
 
