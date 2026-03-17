@@ -68,16 +68,16 @@ def process_client_frame(request):
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(100, 100))
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
         
         # Session state initialization
-        if 'eye_closed_frames' not in request.session:
-            request.session['eye_closed_frames'] = 0
+        if 'eye_history' not in request.session:
+            request.session['eye_history'] = []  # Stores history of eye detection (e.g., [True, True, False, False, True] to identify a real blink)
             request.session['blink_detected'] = False
             request.session['recognition_count'] = 0
             request.session['last_recognized_id'] = None
             
-        eye_closed_frames = request.session['eye_closed_frames']
+        eye_history = request.session['eye_history']
         blink_detected = request.session['blink_detected']
         recognition_count = request.session['recognition_count']
         last_recognized_id = request.session['last_recognized_id']
@@ -90,19 +90,39 @@ def process_client_frame(request):
         for (x, y, fw, fh) in faces:
             # Blink Detection
             roi_gray = gray[y: y + fh // 2, x: x + fw]
-            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.3, minNeighbors=4, minSize=(20, 20))
+            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.3, minNeighbors=4, minSize=(15, 15))
             
-            if len(eyes) == 0:
-                eye_closed_frames += 1
-            else:
-                if eye_closed_frames >= CLOSED_FRAMES_MIN:
+            # Record if we saw eyes this frame
+            saw_eyes = len(eyes) > 0
+            eye_history.append(saw_eyes)
+            
+            # Keep only the last 15 frames of history (approx 2-3 seconds at ~5fps over network)
+            if len(eye_history) > 15:
+                eye_history.pop(0)
+
+            # Analyze history for a "blink signature": True -> False -> True
+            if len(eye_history) >= 5 and not blink_detected:
+                # We want to see: Eyes open recently, then closed recently, then open now.
+                # Example valid sequence: [True, True, False, False, True]
+                
+                # Check if eyes are open right now (last 2 frames)
+                currently_open = any(eye_history[-2:])
+                
+                # Check if eyes were closed just before that
+                closed_recently_window = eye_history[-6:-2]
+                was_closed = len(closed_recently_window) > 0 and not any(closed_recently_window)
+                
+                # Check if eyes were open before they were closed
+                previously_open_window = eye_history[:-6]
+                was_open_before = len(previously_open_window) > 0 and any(previously_open_window)
+                
+                if currently_open and was_closed and was_open_before:
                     blink_detected = True
-                eye_closed_frames = 0
                 
             # Face Recognition
             try:
                 user_id, confidence = recognizer.predict(gray[y:y+fh, x:x+fw])
-                if confidence < 55:
+                if confidence < 48:
                     from .models import UserProfile
                     try:
                         profile = UserProfile.objects.get(user_id=user_id)
@@ -148,7 +168,7 @@ def process_client_frame(request):
             last_recognized_id = None
             
         # Save state to session
-        request.session['eye_closed_frames'] = eye_closed_frames
+        request.session['eye_history'] = eye_history
         request.session['blink_detected'] = blink_detected
         request.session['recognition_count'] = recognition_count
         request.session['last_recognized_id'] = last_recognized_id
