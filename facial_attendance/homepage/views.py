@@ -748,7 +748,7 @@ def manual_attendance(request):
             
         return redirect('todays_attendance')
         
-        students = Student.objects.all()
+    students = Student.objects.all()
     return render(request, 'management/manual_entry.html', {
         'students': students, 
         'show_sidebar': True

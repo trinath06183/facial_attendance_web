@@ -1,0 +1,107 @@
+﻿diff --git a/facial_attendance/facial_attendance/settings.py b/facial_attendance/facial_attendance/settings.py
+index ad41acc..cc56d7d 100644
+--- a/facial_attendance/facial_attendance/settings.py
++++ b/facial_attendance/facial_attendance/settings.py
+@@ -132,5 +132,6 @@ SESSION_COOKIE_AGE = 600 # 10 minutes (in seconds)
+ SESSION_SAVE_EVERY_REQUEST = True # Resets the 10-minute timer on any user activity
+ SESSION_EXPIRE_AT_BROWSER_CLOSE = True # Optional: Also log out if they close the browser tab
+ 
+-
+-
++# Media files (User Datasets)
++MEDIA_URL = '/datasets/'
++MEDIA_ROOT = BASE_DIR / 'datasets'
+diff --git a/facial_attendance/facial_attendance/urls.py b/facial_attendance/facial_attendance/urls.py
+index d62b363..e78507a 100644
+--- a/facial_attendance/facial_attendance/urls.py
++++ b/facial_attendance/facial_attendance/urls.py
+@@ -16,9 +16,13 @@ Including another URLconf
+ """
+ from django.contrib import admin
+ from django.urls import path, include
++from django.conf import settings
++from django.conf.urls.static import static
+ 
+ urlpatterns = [
+     path('django-admin/', admin.site.urls),
+     path('', include('homepage.urls')),
+ ]
+-# 
+\ No newline at end of file
++
++if settings.DEBUG:
++    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+\ No newline at end of file
+diff --git a/facial_attendance/homepage/views.py b/facial_attendance/homepage/views.py
+index 491aa96..6341bcc 100644
+--- a/facial_attendance/homepage/views.py
++++ b/facial_attendance/homepage/views.py
+@@ -102,7 +102,7 @@ def process_client_frame(request):
+             # Face Recognition
+             try:
+                 user_id, confidence = recognizer.predict(gray[y:y+fh, x:x+fw])
+-                if confidence < 75:
++                if confidence < 55:
+                     from .models import UserProfile
+                     try:
+                         profile = UserProfile.objects.get(user_id=user_id)
+@@ -143,7 +143,7 @@ def process_client_frame(request):
+             else:
+                 last_recognized_id = current_recognized_id
+                 recognition_count = 1
+-        elif not blink_detected:
++        else:
+             recognition_count = 0
+             last_recognized_id = None
+             
+@@ -748,7 +748,7 @@ def manual_attendance(request):
+             
+         return redirect('todays_attendance')
+         
+-        students = Student.objects.all()
++    students = Student.objects.all()
+     return render(request, 'management/manual_entry.html', {
+         'students': students, 
+         'show_sidebar': True
+diff --git a/facial_attendance/templates/base.html b/facial_attendance/templates/base.html
+index b66f4f4..30f7155 100644
+--- a/facial_attendance/templates/base.html
++++ b/facial_attendance/templates/base.html
+@@ -6,7 +6,7 @@
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <title>{% block title %}SmartAttend AI{% endblock %}</title>
+-    <script src="https://cdn.tailwindcss.com"></script>
++    <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+     <style>
+diff --git a/facial_attendance/templates/management/all_students.html b/facial_attendance/templates/management/all_students.html
+index a61ca87..a543619 100644
+--- a/facial_attendance/templates/management/all_students.html
++++ b/facial_attendance/templates/management/all_students.html
+@@ -43,8 +43,13 @@
+                         <td class="px-8 py-5">
+                             <div class="flex items-center gap-3">
+                                 <div
+-                                    class="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs">
+-                                    {{ student.user_profile.user.username|slice:":1"|upper }}
++                                    class="w-8 h-8 rounded-full overflow-hidden bg-blue-50 flex items-center justify-center text-blue-600 font-bold text-xs relative">
++                                    <img src="{{ MEDIA_URL }}User.{{ student.user_profile.user.id }}.1.jpg"
++                                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
++                                         class="w-full h-full object-cover" alt="Profile">
++                                    <span style="display:none;" class="absolute inset-0 items-center justify-center">
++                                        {{ student.user_profile.user.username|slice:":1"|upper }}
++                                    </span>
+                                 </div>
+                                 <span class="font-bold text-gray-800">{{ student.user_profile.user.username }}</span>
+                             </div>
+diff --git a/facial_attendance/test_api.py b/facial_attendance/test_api.py
+index 9de4756..b9e123e 100644
+--- a/facial_attendance/test_api.py
++++ b/facial_attendance/test_api.py
+@@ -22,3 +22,4 @@ try:
+         print("Response Text:", response.text)
+ except Exception as e:
+     print("Request failed:", e)
++
