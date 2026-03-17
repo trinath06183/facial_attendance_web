@@ -30,19 +30,23 @@ from django.core.files.base import ContentFile
 
 from django.conf import settings
 import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 import math
 
 # --- Global Classifiers & Models ---
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# MediaPipe Face Mesh for liveness (blink) detection
-mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
+# MediaPipe FaceLandmarker for liveness (blink) detection
+base_options = python.BaseOptions(model_asset_path=os.path.join(settings.BASE_DIR, 'face_landmarker.task'))
+options = vision.FaceLandmarkerOptions(
+    base_options=base_options,
+    num_faces=1,
+    min_face_detection_confidence=0.5,
+    min_face_presence_confidence=0.5,
     min_tracking_confidence=0.5
 )
+face_landmarker = vision.FaceLandmarker.create_from_options(options)
 
 def eye_aspect_ratio(eye_landmarks):
     # Calculate distances between vertical eye landmarks
@@ -91,9 +95,10 @@ def process_client_frame(request):
         np_arr = np.frombuffer(img_bytes, np.uint8)
         frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # MediaPipe needs RGB image
+        # MediaPipe needs RGB image and its own Image format
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mesh_results = face_mesh.process(rgb_frame)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+        mesh_results = face_landmarker.detect(mp_image)
         
         faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
         
@@ -114,10 +119,10 @@ def process_client_frame(request):
         drawing_commands = []
         current_recognized_id = None
         
-        # Blink Detection via MediaPipe
+        # Blink Detection via MediaPipe Tasks API
         current_ear = 0.0
-        if mesh_results.multi_face_landmarks:
-            landmarks = mesh_results.multi_face_landmarks[0].landmark
+        if mesh_results.face_landmarks:
+            landmarks = mesh_results.face_landmarks[0] # First face
             h, w, _ = frame.shape
             
             # Extract 2D coordinates
