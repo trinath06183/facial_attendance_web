@@ -201,7 +201,7 @@ def process_client_frame(request):
             last_recognized_id = None
             
         # Save state to session
-        request.session['eye_history'] = eye_history
+        request.session['ear_history'] = ear_history
         request.session['blink_detected'] = blink_detected
         request.session['recognition_count'] = recognition_count
         request.session['last_recognized_id'] = last_recognized_id
